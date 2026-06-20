@@ -1,0 +1,31 @@
+# Configuración y secretos
+.env
+**/.env
+!.env.example
+!**/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+.pytest_cache/
+
+# Datos locales y archivos de ejecución
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+dashboard/imagenes/
+dashboard/reportes_adjuntos/
+datalake_local/
+
+# Editores y sistema operativo
+.agents/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Paquetes locales de versiones
+versiones/

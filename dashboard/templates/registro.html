@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Registro ciudadano - LSCC</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="auth-body">
+    <main class="login-shell">
+        <section class="login-card modern-auth">
+            <span class="brand-badge large">LSCC</span>
+            <h1>Crear cuenta ciudadana</h1>
+            <p>Esta cuenta sirve para enviar reportes de residuos, ambiente o seguridad.</p>
+            {% if error %}<div class="login-alert error">{{ error }}</div>{% endif %}
+            <form method="POST" action="/registro">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label for="username">Usuario</label>
+                <input id="username" name="username" type="text" placeholder="Ejemplo: vecino01" required>
+                <label for="password">Contraseña</label>
+                <input id="password" name="password" type="password" minlength="10" required>
+                <label for="confirmar">Confirmar contraseña</label>
+                <input id="confirmar" name="confirmar" type="password" minlength="10" required>
+                <button type="submit">Registrarme</button>
+            </form>
+            <p class="auth-note">¿Ya tienes cuenta? <a href="/login">Iniciar sesión</a></p>
+        </section>
+    </main>
+</body>
+</html>

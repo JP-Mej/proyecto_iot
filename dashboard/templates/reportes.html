@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Reportes - Lima Smart Core City</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">
+        <span class="brand-badge">LSCC</span>
+        <div>
+            <h1>{% if rol in ['admin','trabajador'] %}Reportes ciudadanos{% else %}Mis reportes{% endif %}</h1>
+            <p>{% if rol in ['admin','trabajador'] %}Revisa incidencias y cambia su estado de atención.{% else %}Consulta el estado de los reportes que enviaste.{% endif %}</p>
+        </div>
+    </div>
+    <div class="status-box">
+        <span class="user-pill">{{ username }} · {{ rol }}</span>
+        <a class="nav-link" href="/">Dashboard</a>
+        {% if rol == 'usuario' %}<a class="nav-link" href="/nuevo-reporte">Nuevo reporte</a>{% endif %}
+        {% if rol == 'admin' %}<a class="nav-link" href="/usuarios">Trabajadores</a>{% endif %}
+        <form class="logout-form" method="POST" action="/logout">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="logout-link" type="submit">Cerrar sesión</button>
+        </form>
+    </div>
+</header>
+
+<main class="container">
+    <section class="decision-strip">
+        <article class="decision-card"><span>Total</span><strong>{{ contadores.total }}</strong><small>Reportes</small></article>
+        <article class="decision-card urgent"><span>Pendientes</span><strong>{{ contadores.pendiente }}</strong><small>Sin revisar</small></article>
+        <article class="decision-card review"><span>En revisión</span><strong>{{ contadores.en_revision }}</strong><small>En proceso</small></article>
+        <article class="decision-card ok"><span>Atendidos</span><strong>{{ contadores.atendido }}</strong><small>Cerrados</small></article>
+    </section>
+
+    <section class="panel filters-panel">
+        <form method="GET" action="/reportes" class="filters-form">
+            <label>Estado
+                <select name="estado">
+                    <option value="todos" {% if estado_filtro == 'todos' %}selected{% endif %}>Todos</option>
+                    <option value="pendiente" {% if estado_filtro == 'pendiente' %}selected{% endif %}>Pendiente</option>
+                    <option value="en_revision" {% if estado_filtro == 'en_revision' %}selected{% endif %}>En revisión</option>
+                    <option value="atendido" {% if estado_filtro == 'atendido' %}selected{% endif %}>Atendido</option>
+                    <option value="rechazado" {% if estado_filtro == 'rechazado' %}selected{% endif %}>Rechazado</option>
+                </select>
+            </label>
+            <label>Categoría
+                <select name="categoria">
+                    <option value="todos" {% if categoria_filtro == 'todos' %}selected{% endif %}>Todas</option>
+                    <option value="ambiental" {% if categoria_filtro == 'ambiental' %}selected{% endif %}>Ambiental</option>
+                    <option value="residuos" {% if categoria_filtro == 'residuos' %}selected{% endif %}>Residuos</option>
+                    <option value="vigilancia" {% if categoria_filtro == 'vigilancia' %}selected{% endif %}>Videovigilancia</option>
+                </select>
+            </label>
+            <button type="submit">Filtrar</button>
+        </form>
+    </section>
+
+    <section class="reports-grid">
+        {% for r in reportes %}
+        <article class="panel report-card">
+            <div class="report-head">
+                <div>
+                    <span class="role-badge role-{{ r.categoria }}">{{ r.categoria }}</span>
+                    <span class="urgency urgency-{{ r.urgencia }}">{{ r.urgencia }}</span>
+                </div>
+                <span class="state state-{{ r.estado }}">{{ r.estado.replace('_', ' ') }}</span>
+            </div>
+            <h2>{{ r.titulo }}</h2>
+            <p><b>Ubicación:</b> {{ r.ubicacion }}</p>
+            <p><b>Descripción:</b> {{ r.descripcion }}</p>
+            <p class="muted"><b>Enviado por:</b> {{ r.username }} · {{ r.creado_en }}</p>
+            {% if r.imagen %}
+            <p><a class="nav-link inline" href="/reportes/adjunto/{{ r.imagen }}" target="_blank">Ver imagen adjunta</a></p>
+            {% endif %}
+            {% if r.observacion_admin %}
+            <div class="admin-note"><b>Observación admin:</b> {{ r.observacion_admin }}</div>
+            {% endif %}
+
+            {% if rol in ['admin', 'trabajador'] %}
+            <form class="report-update" method="POST" action="/reportes/{{ r.id }}/actualizar">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label>Estado</label>
+                <select name="estado">
+                    <option value="pendiente" {% if r.estado == 'pendiente' %}selected{% endif %}>Pendiente</option>
+                    <option value="en_revision" {% if r.estado == 'en_revision' %}selected{% endif %}>En revisión</option>
+                    <option value="atendido" {% if r.estado == 'atendido' %}selected{% endif %}>Atendido</option>
+                    <option value="rechazado" {% if r.estado == 'rechazado' %}selected{% endif %}>Rechazado</option>
+                </select>
+                <label>Observación</label>
+                <textarea name="observacion_admin" rows="3" placeholder="Ejemplo: Se asigna revisión a personal de campo.">{{ r.observacion_admin or '' }}</textarea>
+                <button type="submit">Actualizar reporte</button>
+            </form>
+            {% endif %}
+        </article>
+        {% else %}
+        <article class="panel"><h2>No hay reportes</h2><p>No se encontraron registros con los filtros seleccionados.</p></article>
+        {% endfor %}
+    </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Login - Lima Smart Core City</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+    <main class="login-card">
+        <div class="login-brand">LSCC</div>
+        <h1>Iniciar sesión</h1>
+        <p>Acceso privado al dashboard Lima Smart Core City</p>
+
+        {% if mensaje == 'sesion_reemplazada' %}
+            <div class="login-alert warning">Tu sesión fue cerrada porque se inició sesión en otro dispositivo.</div>
+        {% elif mensaje == 'usuario_creado' %}
+            <div class="login-alert success">Cuenta ciudadana creada. Ahora puedes iniciar sesión.</div>
+        {% endif %}
+
+        {% if error %}
+            <div class="login-alert error">{{ error }}</div>
+        {% endif %}
+
+        <form method="POST" class="login-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Usuario</label>
+            <input type="text" name="username" placeholder="admin" required autofocus>
+
+            <label>Contraseña</label>
+            <input type="password" name="password" placeholder="••••••••" required>
+
+            <button type="submit">Entrar al dashboard</button>
+        </form>
+            <p class="auth-note">¿Eres ciudadano? <a href="/registro">Crear cuenta para reportar incidencias</a></p>
+
+        <small class="login-help">Las credenciales iniciales se configuran de forma privada en el archivo <b>.env</b>.</small>
+    </main>
+</body>
+</html>

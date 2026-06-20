@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Nuevo reporte - Lima Smart Core City</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">
+        <span class="brand-badge">LSCC</span>
+        <div>
+            <h1>Nuevo reporte</h1>
+            <p>Registra incidencias para que el administrador pueda tomar decisiones.</p>
+        </div>
+    </div>
+    <div class="status-box">
+        <span class="user-pill">{{ username }} · {{ rol }}</span>
+        <a class="nav-link" href="/">Dashboard</a>
+        <a class="nav-link" href="/reportes">Reportes</a>
+        <form class="logout-form" method="POST" action="/logout">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="logout-link" type="submit">Cerrar sesión</button>
+        </form>
+    </div>
+</header>
+
+<main class="container report-layout">
+    <section class="panel user-form-panel">
+        <span class="section-label">Reporte ciudadano</span>
+        <h2>Describe el problema</h2>
+        <p class="form-intro">Puedes reportar problemas de ambiente, residuos o videovigilancia. Mientras más claro sea el lugar, más fácil será atenderlo.</p>
+
+        {% if mensaje %}<div class="login-alert success">{{ mensaje }}</div>{% endif %}
+        {% if error %}<div class="login-alert error">{{ error }}</div>{% endif %}
+
+        <form class="admin-form" method="POST" action="/nuevo-reporte" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label for="categoria">Categoría</label>
+            <select id="categoria" name="categoria" required>
+                <option value="residuos">Residuos</option>
+                <option value="ambiental">Ambiental</option>
+                <option value="vigilancia">Videovigilancia / Seguridad</option>
+            </select>
+
+            <label for="titulo">Título breve</label>
+            <input id="titulo" name="titulo" type="text" placeholder="Ejemplo: basura acumulada cerca del parque" required>
+
+            <label for="ubicacion">Ubicación o referencia</label>
+            <input id="ubicacion" name="ubicacion" type="text" placeholder="Ejemplo: Av. Principal con Jr. Los Pinos" required>
+
+            <label for="urgencia">Urgencia</label>
+            <select id="urgencia" name="urgencia" required>
+                <option value="baja">Baja</option>
+                <option value="media" selected>Media</option>
+                <option value="alta">Alta</option>
+            </select>
+
+            <label for="descripcion">Descripción</label>
+            <textarea id="descripcion" name="descripcion" rows="5" placeholder="Explica qué ocurrió o qué se observa en la zona." required></textarea>
+
+            <label for="imagen">Imagen opcional</label>
+            <input id="imagen" name="imagen" type="file" accept="image/png,image/jpeg,image/webp">
+
+            <button type="submit">Enviar reporte</button>
+        </form>
+    </section>
+
+    <section class="panel help-panel">
+        <span class="section-label">Ejemplos</span>
+        <h2>Qué se puede reportar</h2>
+        <div class="example-list">
+            <p><b>Residuos:</b> basura acumulada, tacho lleno, zona sin recolección.</p>
+            <p><b>Ambiental:</b> olor a gas, humo, aire cargado o situación sospechosa.</p>
+            <p><b>Vigilancia:</b> incidente, ruido fuerte, daño a la maqueta o evento de seguridad.</p>
+        </div>
+    </section>
+</main>
+</body>
+</html>

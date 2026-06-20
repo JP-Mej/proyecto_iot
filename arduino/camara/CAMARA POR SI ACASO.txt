@@ -1,0 +1,246 @@
+#include "esp_camera.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+
+// =====================
+// WiFi
+// =====================
+const char* WIFI_SSID     = "PISO4_PLUS";
+const char* WIFI_PASS     = "12345678*2020";
+
+// =====================
+// MQTT
+// =====================
+const char* MQTT_BROKER = "192.168.100.99";   // IP de tu laptop
+const int MQTT_PORT = 1883;
+const char* MQTT_USER = "lscc_user";
+const char* MQTT_PASSWORD = "lscc2025";
+
+const char* DEVICE_ID = "ESP32_CAM_01";
+
+const char* TOPIC_IMAGEN = "lscc/vigilancia/imagen";
+const char* TOPIC_IMAGEN_META = "lscc/vigilancia/imagen_meta";
+
+// Cada cuánto toma foto
+const unsigned long CAPTURE_INTERVAL = 15000;
+unsigned long lastCapture = 0;
+
+// =====================
+// Pines ESP32-CAM AI Thinker
+// =====================
+#define PWDN_GPIO_NUM     32
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM      0
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       21
+#define Y4_GPIO_NUM       19
+#define Y3_GPIO_NUM       18
+#define Y2_GPIO_NUM        5
+
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
+// =====================
+// Conectar WiFi
+// =====================
+void conectarWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+
+  Serial.print("[WiFi] Conectando a ");
+  Serial.println(WIFI_SSID);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("[WiFi] Conectado");
+  Serial.print("[WiFi] IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+// =====================
+// Conectar MQTT
+// =====================
+void conectarMQTT() {
+  while (!mqttClient.connected()) {
+    Serial.print("[MQTT] Conectando... ");
+
+    if (mqttClient.connect(DEVICE_ID, MQTT_USER, MQTT_PASSWORD)) {
+      Serial.println("OK");
+    } else {
+      Serial.print("ERROR rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" | Reintentando en 3 segundos...");
+      delay(3000);
+    }
+  }
+}
+
+// =====================
+// Inicializar cámara
+// =====================
+bool iniciarCamara() {
+  camera_config_t config;
+
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+
+  // Más estable para MQTT y evita calentar tanto
+  config.frame_size = FRAMESIZE_QVGA;     // 320x240
+  config.jpeg_quality = 14;               // menor número = más calidad/peso
+  config.fb_count = 1;
+
+  esp_err_t err = esp_camera_init(&config);
+
+  if (err != ESP_OK) {
+    Serial.printf("[CAM] Error al iniciar cámara: 0x%x\n", err);
+    return false;
+  }
+
+  Serial.println("[CAM] Cámara inicializada correctamente");
+  return true;
+}
+
+// =====================
+// Publicar metadata JSON
+// =====================
+void publicarMetadata(size_t imageSize, bool imagenEnviada) {
+  StaticJsonDocument<256> doc;
+
+  doc["device_id"] = DEVICE_ID;
+  doc["evento"] = "captura_imagen";
+  doc["formato"] = "jpg";
+  doc["resolucion"] = "QVGA";
+  doc["bytes"] = imageSize;
+  doc["estado"] = imagenEnviada ? "ok" : "error";
+
+  char payload[256];
+  serializeJson(doc, payload);
+
+  bool enviado = mqttClient.publish(TOPIC_IMAGEN_META, payload);
+
+  Serial.print("[MQTT] Metadata: ");
+  Serial.println(enviado ? "OK" : "ERROR");
+  Serial.print("[MQTT] Payload meta: ");
+  Serial.println(payload);
+}
+
+// =====================
+// Capturar y enviar imagen
+// =====================
+void capturarYEnviar() {
+  Serial.println("[CAM] Capturando imagen...");
+
+  camera_fb_t *fb = esp_camera_fb_get();
+
+  if (!fb) {
+    Serial.println("[CAM] Error al capturar imagen");
+    publicarMetadata(0, false);
+    return;
+  }
+
+  Serial.print("[CAM] Imagen capturada: ");
+  Serial.print(fb->len);
+  Serial.println(" bytes");
+
+  bool enviado = mqttClient.publish(TOPIC_IMAGEN, fb->buf, fb->len);
+
+  Serial.print("[MQTT] Imagen: ");
+  Serial.println(enviado ? "OK" : "ERROR");
+
+  publicarMetadata(fb->len, enviado);
+
+  esp_camera_fb_return(fb);
+}
+
+// =====================
+// Setup
+// =====================
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  Serial.println();
+  Serial.println("====================================");
+  Serial.println(" Lima Smart Core City - ESP32-CAM");
+  Serial.println(" Captura por MQTT, no streaming");
+  Serial.println("====================================");
+
+  conectarWiFi();
+
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setBufferSize(50000);
+
+  conectarMQTT();
+
+  if (!iniciarCamara()) {
+    Serial.println("[CAM] No se pudo iniciar la cámara");
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  delay(1000);
+  capturarYEnviar();
+  lastCapture = millis();
+}
+
+// =====================
+// Loop
+// =====================
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) {
+    conectarWiFi();
+  }
+
+  if (!mqttClient.connected()) {
+    conectarMQTT();
+  }
+
+  mqttClient.loop();
+
+  unsigned long now = millis();
+
+  if (now - lastCapture >= CAPTURE_INTERVAL) {
+    lastCapture = now;
+    capturarYEnviar();
+  }
+}
