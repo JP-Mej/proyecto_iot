@@ -4,7 +4,7 @@ Este ZIP ya incluye autenticación para el dashboard Flask.
 
 ## Credenciales iniciales
 - Usuario: `admin`
-- Contraseña: `admin123`
+- Contraseña: valor privado `ADMIN_INITIAL_PASSWORD` de `dashboard/.env`.
 
 ## Cómo funciona la sesión única
 Cuando un usuario inicia sesión, se genera un nuevo `session_token` y se guarda en SQLite en la tabla `usuarios`.
@@ -31,4 +31,4 @@ La sesión anterior queda inválida y será enviada al login cuando intente nave
 4. Abre `http://127.0.0.1:5000` o la IP de tu laptop en la red.
 
 ## Importante
-Cambia la contraseña inicial antes de usarlo en una red compartida.
+No publiques el archivo `.env` y rota la contraseña antes de usar una red compartida.

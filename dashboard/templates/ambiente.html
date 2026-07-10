@@ -1,0 +1,15 @@
+{% set active_page = 'ambiente' %}{% set requires_charts = true %}{% extends "base_dashboard.html" %}
+{% block title %}Ambiente{% endblock %}{% block heading %}Área de Ambiente{% endblock %}{% block subheading %}Variables físicas y estado del nodo ambiental{% endblock %}
+{% block content %}
+<header class="page-heading"><div><span class="mod-tag tag-ambiental">Ambiental</span><h1>DHT22, BMP280 y MQ-2</h1><p>Lecturas actuales e historial del módulo.</p></div><div class="mod-right"><span id="airQualityBadge" class="quality-badge">--</span><span id="ambientalNodeDot" class="node-dot offline" title="ESP32_AIRE_01"></span></div></header>
+<section id="sec-ambiental" class="module mod-ambiental module-page">
+  <div class="node-bar"><div class="nb-item"><span class="nb-label">Nodo</span><span class="nb-value">ESP32_AIRE_01</span></div><div class="nb-item"><span class="nb-label">Sensores activos</span><span id="ambSensoresActivos" class="nb-value nb-count">-- / 3</span></div><div class="nb-chips"><span id="chipDHT22" class="sensor-chip offline">DHT22</span><span id="chipBMP280" class="sensor-chip offline">BMP280</span><span id="chipMQ2" class="sensor-chip offline">MQ-2</span></div><div class="nb-item"><span class="nb-label">Última lectura</span><span id="ambLastSeen" class="nb-value">--</span></div></div>
+  <div class="ambient-grid">
+    <article class="metric-card"><span class="mc-label">Temperatura</span><strong id="temperatura" class="mc-value">--</strong><small>°C · DHT22</small><div class="mc-bar"><span id="temperaturaBar" class="bar-fill"></span></div></article>
+    <article class="metric-card"><span class="mc-label">Humedad</span><strong id="humedad" class="mc-value">--</strong><small>%HR · DHT22</small><div class="mc-bar"><span id="humedadBar" class="bar-fill"></span></div></article>
+    <article class="metric-card"><span class="mc-label">Presión</span><strong id="presion" class="mc-value">--</strong><small>hPa · BMP280</small><div class="mc-bar"><span id="presionBar" class="bar-fill bar-neutral"></span></div></article>
+    <article class="metric-card"><span class="mc-label">Gas MQ-2</span><strong id="gasNivel" class="mc-value">--</strong><small id="gasDetalle">ADC: -- · V: --</small><div class="mc-bar"><span id="gasBar" class="bar-fill"></span></div></article>
+  </div>
+  <article class="chart-card"><h3>Historial ambiental</h3><div class="chart-wrap"><canvas id="chartAmbiental"></canvas></div></article>
+</section>
+{% endblock %}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  {% block meta %}{% endblock %}
+  <title>{% block title %}Lima Smart Core City{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="public-body {% block body_class %}{% endblock %}">
+  {% set endpoint = request.endpoint %}
+  <header class="public-header">
+    <nav class="public-nav" aria-label="Navegación pública">
+      <a class="public-brand" href="{{ url_for('index') }}" aria-label="Lima Smart Core City, inicio"><span class="brand-badge">LSCC</span><span><strong>Lima Smart</strong><small>Core City</small></span></a>
+      <div class="public-links">
+        <a href="{{ url_for('index') }}" class="public-nav-link {% if endpoint == 'index' %}active{% endif %}" {% if endpoint == 'index' %}aria-current="page"{% endif %}>Inicio</a>
+        <a href="{{ url_for('estado_urbano') }}" class="public-nav-link {% if endpoint == 'estado_urbano' %}active{% endif %}" {% if endpoint == 'estado_urbano' %}aria-current="page"{% endif %}>Estado urbano</a>
+        <a href="{{ url_for('nuevo_reporte') }}" class="public-nav-link {% if endpoint == 'nuevo_reporte' %}active{% endif %}" {% if endpoint == 'nuevo_reporte' %}aria-current="page"{% endif %}>Reportar incidencia</a>
+        <a href="{{ url_for('consulta_reporte') }}" class="public-nav-link {% if endpoint == 'consulta_reporte' %}active{% endif %}" {% if endpoint == 'consulta_reporte' %}aria-current="page"{% endif %}>Consultar reporte</a>
+      </div>
+      <div class="public-actions"><a class="public-btn secondary" href="{{ url_for('registro') }}">Crear cuenta</a><a class="public-btn primary" href="{{ url_for('login') }}">Iniciar sesión</a></div>
+    </nav>
+  </header>
+  {% block content %}{% endblock %}
+  {% block footer %}{% endblock %}
+</body>
+</html>

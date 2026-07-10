@@ -1,0 +1,10 @@
+{% set active_page = 'vigilancia' %}{% set requires_charts = false %}{% extends "base_dashboard.html" %}
+{% block title %}Vigilancia{% endblock %}{% block heading %}Área de Vigilancia{% endblock %}{% block subheading %}Supervisión visual mediante ESP32-CAM{% endblock %}
+{% block content %}
+<header class="page-heading"><div><span class="mod-tag tag-vigilancia">Vigilancia</span><h1>Cámara ESP32-CAM</h1><p>Transmisión y estado actual del dispositivo.</p></div><span id="camLivePill" class="pill">Sin señal</span></header>
+<section id="sec-camara" class="module mod-vigilancia module-page">
+  <div class="camera-box"><img id="cameraImage" src="http://10.101.53.9/stream" alt="Stream ESP32-CAM"></div>
+  <p class="camera-meta"><span id="imgMeta">Conectando al stream...</span></p>
+  <div class="module-note"><strong>Eventos de vigilancia</strong><p>Los eventos y metadatos existentes se reflejan mediante el estado actual de la cámara.</p></div>
+</section>
+{% endblock %}

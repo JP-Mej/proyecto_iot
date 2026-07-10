@@ -6,8 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="dashboard-body citizen-page">
+<input class="nav-toggle" type="checkbox" id="navToggle" aria-label="Abrir menú de navegación"><label class="nav-backdrop" for="navToggle"></label>
+<aside class="sidebar compact-sidebar"><div class="sidebar-brand"><span class="brand-badge">LSCC</span><div><strong>Lima Smart</strong><small>Core City</small></div></div><nav class="sidebar-nav"><span class="nav-group">Participación</span><a class="side-link" href="/">⌂ Inicio</a><a class="side-link active" href="/nuevo-reporte">＋ Nuevo reporte</a><a class="side-link" href="/reportes">□ Mis reportes</a></nav><div class="sidebar-account"><div class="account-chip"><span class="avatar">{{ username[0]|upper }}</span><div><strong>{{ username }}</strong><small>{{ rol }}</small></div></div><form class="logout-form" method="POST" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="side-logout" type="submit">Cerrar sesión</button></form></div></aside>
 <header class="topbar">
+    <label class="menu-button" for="navToggle" aria-label="Abrir menú">☰</label>
     <div class="brand">
         <span class="brand-badge">LSCC</span>
         <div>
@@ -62,6 +65,10 @@
 
             <label for="imagen">Imagen opcional</label>
             <input id="imagen" name="imagen" type="file" accept="image/png,image/jpeg,image/webp">
+
+            <label for="correo_contacto">Correo de contacto (opcional)</label>
+            <input id="correo_contacto" name="correo_contacto" type="email" value="{{ correo_contacto }}" autocomplete="email">
+            <small class="field-help">No es obligatorio. Puede servir para futuras notificaciones sobre tu reporte.</small>
 
             <button type="submit">Enviar reporte</button>
         </form>

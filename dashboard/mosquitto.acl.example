@@ -1,0 +1,20 @@
+# Sustituye los usuarios por credenciales únicas para cada dispositivo.
+user dashboard_lscc
+topic read lscc/#
+
+user esp32_aire_01
+topic write lscc/ambiental/#
+topic write lscc/sistema/status
+
+user esp32_residuos_01
+topic write lscc/residuos/#
+topic write lscc/sistema/status
+
+user esp32_camara_01
+topic write lscc/vigilancia/imagen
+topic write lscc/vigilancia/imagen_meta
+topic write lscc/sistema/status
+
+user esp32_ky037_01
+topic write lscc/vigilancia/sonido
+topic write lscc/sistema/status

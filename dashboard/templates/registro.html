@@ -9,9 +9,10 @@
 <body class="auth-body">
     <main class="login-shell">
         <section class="login-card modern-auth">
+            <a class="back-home" href="/">← Volver al inicio</a>
             <span class="brand-badge large">LSCC</span>
             <h1>Crear cuenta ciudadana</h1>
-            <p>Esta cuenta sirve para enviar reportes de residuos, ambiente o seguridad.</p>
+            <p>Crear una cuenta te permite consultar y organizar tus reportes desde un solo lugar.</p>
             {% if error %}<div class="login-alert error">{{ error }}</div>{% endif %}
             <form method="POST" action="/registro">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

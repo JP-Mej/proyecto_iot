@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lscc.local/schemas/estado-dispositivo.schema.json",
+  "title": "Estado de dispositivo LSCC",
+  "type": "object",
+  "required": ["schema_version", "device_id", "modulo", "status"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "device_id": { "type": "string", "pattern": "^ESP32_[A-Z0-9_]+$" },
+    "modulo": { "enum": ["ambiental", "calidad_aire", "residuos", "vigilancia", "videovigilancia"] },
+    "status": { "enum": ["online", "offline", "sin_datos", "error"] },
+    "firmware_version": { "type": "string" },
+    "uptime_ms": { "type": "integer", "minimum": 0 },
+    "rssi_dbm": { "type": "integer", "minimum": -120, "maximum": 0 },
+    "ip": { "type": "string" }
+  },
+  "additionalProperties": true
+}

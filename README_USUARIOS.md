@@ -10,7 +10,7 @@ Se agregó un apartado exclusivo para administradores:
 
 ```txt
 Usuario: admin
-Contraseña: admin123
+Contraseña: definida en ADMIN_INITIAL_PASSWORD dentro de dashboard/.env
 Rol: admin
 ```
 

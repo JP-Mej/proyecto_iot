@@ -1,0 +1,24 @@
+{% set active_page = 'dashboard' %}{% set requires_charts = false %}{% extends "base_dashboard.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block heading %}Resumen general{% endblock %}
+{% block subheading %}Estado operativo de Lima Smart Core City{% endblock %}
+{% block content %}
+<header class="page-heading"><div><span class="section-label">{% if rol == 'admin' %}Vista general{% else %}Operación urbana{% endif %}</span><h1>{% if rol == 'admin' %}Centro de operaciones{% else %}Panel operativo{% endif %}</h1><p>{% if rol == 'admin' %}Accede a cada módulo para consultar sus métricas e historial.{% else %}Revisa reportes pendientes y monitorea el estado de los módulos.{% endif %}</p></div><a class="nav-link" href="/reportes">{% if rol == 'trabajador' %}Atender incidencias{% else %}Ver reportes{% endif %}</a></header>
+{% if rol == 'trabajador' %}<a class="operation-callout" href="/reportes"><div><span class="section-label">Trabajo prioritario</span><h3>Atención de incidencias</h3><p>Consulta los reportes pendientes, registra observaciones y actualiza su estado.</p></div><span class="overview-arrow">→</span></a>{% endif %}
+<section class="quick-stats">
+  <article class="qs-card"><span>Total reportes</span><strong>{{ contadores.total }}</strong><small>Todos los registrados</small></article>
+  <article class="qs-card qs-warn"><span>Pendientes</span><strong>{{ contadores.pendiente }}</strong><small>Necesitan revisión</small></article>
+  <article class="qs-card qs-info"><span>En revisión</span><strong>{{ contadores.en_revision }}</strong><small>En proceso</small></article>
+  <article class="qs-card qs-ok"><span>Atendidos</span><strong>{{ contadores.atendido }}</strong><small>Casos cerrados</small></article>
+</section>
+<section class="route-summary-widget panel" aria-labelledby="routeSummaryTitle"><div class="route-summary-map"><div class="mini-model-map"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline id="rutaResumenLinea" points="" vector-effect="non-scaling-stroke"></polyline></svg><div id="rutaResumenMarcadores"></div></div></div><div class="route-summary-content"><div class="route-summary-heading"><div><span class="section-label">Planificación operativa</span><h2 id="routeSummaryTitle">Ruta de recojo actual</h2></div><span id="rutaResumenEstado" class="mini-pill" hidden></span></div><div id="rutaResumenVacia"><p>Aún no se ha generado un recorrido.</p><small id="rutaResumenVaciaFecha"></small></div><div id="rutaResumenDatos" hidden><p id="rutaResumenSecuencia" class="route-sequence compact"></p><div class="route-summary-stats"><span><strong id="rutaResumenProgramados">0</strong> programados</span><span><strong id="rutaResumenOmitidos">0</strong> omitidos</span><span><strong id="rutaResumenDistancia">0</strong> unidades</span></div><small id="rutaResumenFecha"></small></div><a id="rutaResumenAccion" class="nav-link" href="/ruta-recoleccion">Ir a planificación de recojo</a></div></section>
+<section class="overview-grid">
+  <a class="overview-card" href="/vigilancia"><div><span class="mod-tag tag-vigilancia">Vigilancia</span><h3>ESP32-CAM</h3><p>Stream y estado de señal</p></div><span id="camLivePill" class="pill">Sin señal</span></a>
+  <a class="overview-card" href="/ambiente"><div><span class="mod-tag tag-ambiental">Ambiente</span><h3>DHT22 · BMP280 · MQ-2</h3><p>Variables y calidad ambiental</p></div><span id="ambientalNodeDot" class="node-dot offline"></span></a>
+  <a class="overview-card" href="/residuos"><div><span class="mod-tag tag-residuos">Residuos</span><h3>3 contenedores</h3><p>Monitoreo de nivel y alertas</p></div><span id="residuosNodeDot" class="node-dot offline"></span></a>
+  <a class="overview-card" href="/sonido"><div><span class="mod-tag tag-sonido">Sonido</span><h3>Sensor KY-037</h3><p>Actividad sonora disponible</p></div><span id="sonidoNodeDot" class="node-dot offline"></span></a>
+  <a class="overview-card" href="/registro-tecnico"><div><span class="mod-tag tag-log">Sistema</span><h3>Registro técnico</h3><p>Mensajes MQTT y eventos internos</p></div><span class="overview-arrow">→</span></a>
+  {% if rol == 'admin' %}<a class="overview-card" href="/usuarios"><div><span class="mod-tag tag-ambiental">Administración</span><h3>Trabajadores</h3><p>Gestión de cuentas internas</p></div><span class="overview-arrow">→</span></a>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/mapa_maqueta.js"></script><script src="/static/ruta_resumen.js"></script>{% endblock %}

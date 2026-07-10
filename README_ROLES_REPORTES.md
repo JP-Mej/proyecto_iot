@@ -5,7 +5,7 @@ Esta versión agrega una división funcional entre usuarios normales y administr
 ## Credenciales iniciales
 
 - Usuario: `admin`
-- Contraseña: `admin123`
+- Contraseña: valor privado `ADMIN_INITIAL_PASSWORD` de `dashboard/.env`.
 - Rol: `admin`
 
 ## Roles
@@ -74,4 +74,3 @@ Luego abrir:
 ```text
 http://127.0.0.1:5000
 ```
-

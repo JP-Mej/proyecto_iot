@@ -1,8 +1,17 @@
-# Configuración y secretos
+# Configuracion y secretos
 .env
 **/.env
 !.env.example
 !**/.env.example
+**/secrets.h
+!**/secrets.h.example
+dashboard/mosquitto_passwd.txt
+**/*passwd*.txt
+!**/*passwd*.example
+*.key
+*.pem
+*.crt
+*.token
 
 # Python
 __pycache__/
@@ -10,9 +19,14 @@ __pycache__/
 venv/
 .venv/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
 
-# Datos locales y archivos de ejecución
+# Datos locales y archivos de ejecucion
 *.db
+*.sqlite
+*.sqlite3
 *.db-wal
 *.db-shm
 *.db-journal
@@ -20,8 +34,29 @@ dashboard/imagenes/
 dashboard/reportes_adjuntos/
 datalake_local/
 
-# Editores y sistema operativo
+# Modelos, datasets y notebooks locales
+models/
+modelos/
+datasets/
+*.pkl
+*.joblib
+*.h5
+*.keras
+*.onnx
+*.pt
+*.pth
+
+# Logs y temporales
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# Editores, agentes y sistema operativo
 .agents/
+.claude/
+.codex/
 .vscode/
 .idea/
 .DS_Store

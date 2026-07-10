@@ -17,10 +17,12 @@
 */
 
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <WiFiManager.h>
 #include <Preferences.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include "secrets.h"
 
 // ============================================================
 // CONFIGURACIÓN GENERAL
@@ -28,10 +30,13 @@
 
 const char* DEVICE_ID = "ESP32_RESIDUOS_01";
 const char* TOPIC_RESIDUOS = "lscc/residuos/nivel";
+const char* TOPIC_STATUS = "lscc/sistema/status";
+const char* FIRMWARE_VERSION = "1.1.0";
+const char* SCHEMA_VERSION = "1.0";
 
 // Portal de configuración WiFiManager
 const char* AP_NAME = "LSCC_RESIDUOS_SETUP";
-const char* AP_PASS = "lscc12345";
+const char* AP_PASS = LSCC_CONFIG_AP_PASSWORD;
 
 // Botón para borrar configuración
 #define RESET_BUTTON_PIN 23
@@ -49,6 +54,7 @@ const float ALTURA_TACHO_CM = 30.0;
 
 // Tiempo entre envíos MQTT
 const unsigned long INTERVALO_ENVIO = 5000;
+const int MQTT_MAX_FAILED_ATTEMPTS = 5;
 
 // ============================================================
 // OBJETOS GLOBALES
@@ -256,11 +262,75 @@ void configurarWiFiYMqtt() {
   guardarConfiguracionMQTT(nuevoBroker, nuevoPort, nuevoUser, nuevoPass);
 }
 
+void abrirPortalConfigMQTT(const char* motivo) {
+  Serial.println();
+  Serial.print("[WiFiManager] Abriendo portal de configuracion: ");
+  Serial.println(motivo);
+
+  WiFiManager wm;
+
+  WiFiManagerParameter customBroker(
+    "broker",
+    "MQTT Broker IP/Host",
+    mqttBroker.c_str(),
+    40
+  );
+
+  WiFiManagerParameter customPort(
+    "port",
+    "MQTT Port",
+    mqttPort.c_str(),
+    6
+  );
+
+  WiFiManagerParameter customUser(
+    "user",
+    "MQTT User",
+    mqttUser.c_str(),
+    30
+  );
+
+  WiFiManagerParameter customPass(
+    "pass",
+    "MQTT Password",
+    mqttPassword.c_str(),
+    30
+  );
+
+  wm.addParameter(&customBroker);
+  wm.addParameter(&customPort);
+  wm.addParameter(&customUser);
+  wm.addParameter(&customPass);
+  wm.setConfigPortalTimeout(0);
+
+  if (!wm.startConfigPortal(AP_NAME, AP_PASS)) {
+    Serial.println("[WiFiManager] Portal cerrado sin configurar. Reiniciando...");
+    delay(1000);
+    ESP.restart();
+  }
+
+  String nuevoBroker = customBroker.getValue();
+  String nuevoPort = customPort.getValue();
+  String nuevoUser = customUser.getValue();
+  String nuevoPass = customPass.getValue();
+
+  if (nuevoPort.length() == 0) {
+    nuevoPort = "1883";
+  }
+
+  guardarConfiguracionMQTT(nuevoBroker, nuevoPort, nuevoUser, nuevoPass);
+  client.setServer(mqttBroker.c_str(), mqttPort.toInt() > 0 ? mqttPort.toInt() : 1883);
+
+  Serial.print("[MQTT] Nuevo broker guardado: ");
+  Serial.println(mqttBroker);
+}
+
 // ============================================================
 // CONECTAR MQTT
 // ============================================================
 
 void conectarMQTT() {
+  int intentosFallidos = 0;
   int puerto = mqttPort.toInt();
 
   if (puerto <= 0) {
@@ -272,6 +342,15 @@ void conectarMQTT() {
   while (!client.connected()) {
     verificarBotonReset();
 
+    if (mqttBroker.length() == 0) {
+      abrirPortalConfigMQTT("no hay broker MQTT configurado");
+      intentosFallidos = 0;
+      puerto = mqttPort.toInt();
+      if (puerto <= 0) {
+        puerto = 1883;
+      }
+    }
+
     Serial.print("[MQTT] Conectando a ");
     Serial.print(mqttBroker);
     Serial.print(":");
@@ -280,22 +359,58 @@ void conectarMQTT() {
 
     bool conectadoMQTT = false;
 
+    StaticJsonDocument<160> willDoc;
+    willDoc["device_id"] = DEVICE_ID;
+    willDoc["modulo"] = "residuos";
+    willDoc["status"] = "offline";
+    willDoc["schema_version"] = SCHEMA_VERSION;
+    char willPayload[160];
+    serializeJson(willDoc, willPayload);
+
     if (mqttUser.length() > 0) {
       conectadoMQTT = client.connect(
         DEVICE_ID,
         mqttUser.c_str(),
-        mqttPassword.c_str()
+        mqttPassword.c_str(),
+        TOPIC_STATUS, 1, true, willPayload
       );
     } else {
-      conectadoMQTT = client.connect(DEVICE_ID);
+      conectadoMQTT = client.connect(
+        DEVICE_ID, nullptr, nullptr,
+        TOPIC_STATUS, 1, true, willPayload
+      );
     }
 
     if (conectadoMQTT) {
       Serial.println("OK");
+      StaticJsonDocument<256> statusDoc;
+      statusDoc["device_id"] = DEVICE_ID;
+      statusDoc["modulo"] = "residuos";
+      statusDoc["status"] = "online";
+      statusDoc["schema_version"] = SCHEMA_VERSION;
+      statusDoc["firmware_version"] = FIRMWARE_VERSION;
+      statusDoc["uptime_ms"] = millis();
+      statusDoc["rssi_dbm"] = WiFi.RSSI();
+      statusDoc["ip"] = WiFi.localIP().toString();
+      statusDoc["sensores_configurados"] = N_SENS;
+      char statusPayload[256];
+      serializeJson(statusDoc, statusPayload);
+      client.publish(TOPIC_STATUS, statusPayload, true);
     } else {
+      intentosFallidos++;
       Serial.print("ERROR, rc=");
       Serial.print(client.state());
       Serial.println(" | Reintentando en 3 segundos...");
+
+      if (intentosFallidos >= MQTT_MAX_FAILED_ATTEMPTS) {
+        abrirPortalConfigMQTT("no se pudo conectar al broker MQTT");
+        intentosFallidos = 0;
+        puerto = mqttPort.toInt();
+        if (puerto <= 0) {
+          puerto = 1883;
+        }
+      }
+
       delay(3000);
     }
   }
@@ -381,6 +496,8 @@ void publicarSensor(int numSensor, float distancia) {
   doc["nivel"] = nivel;
   doc["estado"] = distancia >= 0 ? "ok" : "error";
   doc["unit"] = "cm";
+  doc["schema_version"] = SCHEMA_VERSION;
+  doc["uptime_ms"] = millis();
 
   char payload[256];
   serializeJson(doc, payload);
@@ -446,6 +563,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
 
   configurarWiFiYMqtt();
+  MDNS.begin("lscc-residuos");
 
   conectarMQTT();
 

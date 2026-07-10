@@ -182,7 +182,7 @@ $parts.Add((New-Bullet "Opcional: subir solo imagenes asociadas a eventos import
 
 Add-Section $parts "11. Riesgos y recomendaciones"
 $parts.Add((New-Bullet "No publicar credenciales en GitHub ni en documentos publicos.")) | Out-Null
-$parts.Add((New-Bullet "Cambiar credenciales por defecto como admin123, lscc2025 y la clave secreta Flask antes de exponer el sistema.")) | Out-Null
+$parts.Add((New-Bullet "Usar credenciales únicas, rotarlas y mantener los secretos fuera del repositorio antes de exponer el sistema.")) | Out-Null
 $parts.Add((New-Bullet "Evitar abrir el bucket S3 al publico.")) | Out-Null
 $parts.Add((New-Bullet "Usar Athena con cuidado: cobra por datos escaneados, asi que conviene particionar archivos por fecha y preferir Parquet en una fase posterior.")) | Out-Null
 $parts.Add((New-Bullet "Mantener SQLite local como respaldo operativo y crear copias periodicas en S3.")) | Out-Null

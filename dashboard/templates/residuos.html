@@ -1,0 +1,12 @@
+﻿{% set active_page = 'residuos' %}{% set requires_charts = true %}{% extends "base_dashboard.html" %}
+{% block title %}Residuos{% endblock %}{% block heading %}Ãrea de Residuos{% endblock %}{% block subheading %}Estado de los cuatro contenedores monitoreados{% endblock %}
+{% block content %}
+<header class="page-heading"><div><span class="mod-tag tag-residuos">Residuos</span><h1>Monitoreo de contenedores</h1><p>Nivel actual e historial por sensor.</p></div><span id="residuosNodeDot" class="node-dot offline" title="ESP32_RESIDUOS_01"></span></header>
+<section id="sec-residuos" class="module mod-residuos module-page">
+  <div class="res-overview"><div class="ro-item"><span class="ro-label">Nodo</span><span class="ro-value">ESP32_RESIDUOS_01</span></div><div class="ro-item"><span class="ro-label">Sensores activos</span><strong id="resSensoresActivos" class="ro-value">-- / 4</strong></div><div class="ro-item"><span class="ro-label">Llenado promedio</span><strong id="resPromedio" class="ro-value">--%</strong></div><div class="ro-item ro-alert-item"><span class="ro-label">Requieren vaciado</span><strong id="resAlerta" class="ro-value">0</strong></div></div>
+  <div class="trash-grid">
+    {% for id, etiqueta in [(1,'A'),(2,'B'),(3,'C'),(4,'D')] %}<article class="trash-card" id="tachoCard{{ id }}"><div class="tc-top"><span class="tc-label">Tacho {{ etiqueta }}</span><span id="tacho{{ id }}NivelTxt" class="mini-pill">--</span></div><div class="tc-body"><div class="tc-fill-wrap"><div id="tacho{{ id }}Fill" class="tc-fill-bar" style="height:0%"></div></div><strong id="tacho{{ id }}Porcentaje" class="tc-pct">--</strong></div><div class="progress tc-progress"><span id="tacho{{ id }}Bar"></span></div><small id="tacho{{ id }}Detalle" class="tc-detail">Distancia: -- cm Â· Ãšltima: --</small></article>{% endfor %}
+  </div>
+  <article class="chart-card"><h3>Historial de residuos por tacho</h3><div class="chart-wrap"><canvas id="chartResiduos"></canvas></div></article>
+</section>
+{% endblock %}

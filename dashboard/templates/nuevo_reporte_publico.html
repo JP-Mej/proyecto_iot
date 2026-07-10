@@ -1,0 +1,9 @@
+{% extends "base_public.html" %}{% block title %}Reportar incidencia · LSCC{% endblock %}{% block body_class %}public-form-body{% endblock %}
+{% block content %}<main class="public-form-shell"><section class="panel public-report-form"><span class="section-label">Participación ciudadana</span><h1>Reportar una incidencia</h1><p>Puedes enviar el reporte sin crear una cuenta. Al finalizar recibirás un código privado de seguimiento.</p>
+{% if error %}<div class="login-alert error">{{ error }}</div>{% endif %}
+<form class="admin-form" method="POST" action="/nuevo-reporte" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label for="categoria">Categoría</label><select id="categoria" name="categoria" required><option value="residuos">Residuos</option><option value="ambiental">Ambiental</option><option value="vigilancia">Videovigilancia / Seguridad</option></select>
+<label for="titulo">Título breve</label><input id="titulo" name="titulo" type="text" required><label for="ubicacion">Ubicación o referencia</label><input id="ubicacion" name="ubicacion" type="text" required>
+<label for="urgencia">Urgencia</label><select id="urgencia" name="urgencia" required><option value="baja">Baja</option><option value="media" selected>Media</option><option value="alta">Alta</option></select>
+<label for="descripcion">Descripción</label><textarea id="descripcion" name="descripcion" rows="5" required></textarea><label for="imagen">Imagen opcional</label><input id="imagen" name="imagen" type="file" accept="image/png,image/jpeg,image/webp">
+<label for="correo_contacto">Correo de contacto (opcional)</label><input id="correo_contacto" name="correo_contacto" type="email" value="{{ correo_contacto }}" autocomplete="email"><small class="field-help">No es obligatorio. Puede servir para futuras notificaciones sobre tu reporte.</small><button type="submit">Registrar incidencia</button></form></section></main>{% endblock %}

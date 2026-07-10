@@ -1,0 +1,9 @@
+{% set active_page = 'sonido' %}{% set requires_charts = true %}{% extends "base_dashboard.html" %}
+{% block title %}Sonido{% endblock %}{% block heading %}Sonido ambiental{% endblock %}{% block subheading %}Actividad registrada por el sensor KY-037{% endblock %}
+{% block content %}
+<header class="page-heading"><div><span class="mod-tag tag-sonido">Sonido</span><h1>Sensor KY-037</h1><p>Lectura disponible e historial del módulo.</p></div><span id="sonidoNodeDot" class="node-dot offline" title="ESP32_KY037_01"></span></header>
+<section id="sec-sonido" class="module mod-sonido module-page">
+  <div class="sound-grid"><article class="sound-main metric-card"><span class="mc-label">Nivel de sonido</span><strong id="sonidoPorcentaje" class="mc-value">--</strong><div class="mc-bar"><span id="sonidoBar" class="bar-fill"></span></div><small id="sonidoEstado">Evento: --</small></article><article class="metric-card"><span class="mc-label">Valor RAW ADC</span><strong id="sonidoRaw" class="mc-value">--</strong><small>Rango ESP32: 0 – 4095</small></article><article class="metric-card"><span class="mc-label">Voltaje</span><strong id="sonidoVoltaje" class="mc-value">--</strong><small>Salida AO del KY-037</small></article><article class="metric-card"><span class="mc-label">Clasificación</span><strong id="sonidoNivel" class="mc-value">--</strong><small>Según umbrales del sensor</small></article></div>
+  <article class="chart-card"><h3>Historial de sonido</h3><div class="chart-wrap"><canvas id="chartSonido"></canvas></div></article>
+</section>
+{% endblock %}

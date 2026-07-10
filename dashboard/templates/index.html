@@ -1,313 +1,413 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Lima Smart Core City - Dashboard</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="stylesheet" href="/static/style.css" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<head>
+  <meta charset="UTF-8"/>
+  <title>Lima Smart Core City</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <link rel="stylesheet" href="/static/style.css"/>
+  {% if rol in ['admin', 'trabajador'] %}<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>{% endif %}
+</head>
+<body class="dashboard-body">
+<input class="nav-toggle" type="checkbox" id="navToggle" aria-label="Abrir menÃº de navegaciÃ³n">
+<label class="nav-backdrop" for="navToggle" aria-hidden="true"></label>
+<aside class="sidebar">
+  <div class="sidebar-brand"><span class="brand-badge">LSCC</span><div><strong>Lima Smart</strong><small>Core City</small></div></div>
+  <nav class="sidebar-nav" aria-label="NavegaciÃ³n principal">
+    <span class="nav-group">General</span>
+    <a class="side-link active" href="/"><span>âŒ‚</span> {% if rol == 'usuario' %}Inicio{% else %}Dashboard{% endif %}</a>
+    {% if rol in ['admin', 'trabajador'] %}
+    <span class="nav-group">Monitoreo</span>
+    <a class="side-link" href="#sec-camara"><span>â—‰</span> Ãrea de Vigilancia</a>
+    <a class="side-link" href="#sec-ambiental"><span>â—Œ</span> Ãrea de Ambiente</a>
+    <a class="side-link" href="#sec-residuos"><span>â–¦</span> Ãrea de Residuos</a>
+    <a class="side-link" href="#sec-sonido"><span>â‰‹</span> Sonido ambiental</a>
+    <a class="side-link" href="#sec-log"><span>âŒ</span> Registro tÃ©cnico</a>
+    <span class="nav-group">GestiÃ³n</span>
+    <a class="side-link" href="/reportes"><span>â–¡</span> {% if rol == 'trabajador' %}Atender reportes{% else %}Reportes{% endif %}</a>
+    {% if rol == 'admin' %}<a class="side-link" href="/usuarios"><span>â™™</span> Trabajadores</a>{% endif %}
+    {% else %}
+    <span class="nav-group">ParticipaciÃ³n</span>
+    <a class="side-link" href="/nuevo-reporte"><span>ï¼‹</span> Nuevo reporte</a>
+    <a class="side-link" href="/reportes"><span>â–¡</span> Mis reportes</a>
+    {% endif %}
+  </nav>
+  <div class="sidebar-account"><span class="nav-group">Cuenta</span><div class="account-chip"><span class="avatar">{{ username[0]|upper }}</span><div><strong>{{ username }}</strong><small>{{ rol }}</small></div></div>
+    <form class="logout-form" method="POST" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="side-logout" type="submit">Cerrar sesiÃ³n</button></form>
+  </div>
+</aside>
 
-    <style>
-      /* 1. Evita que toda la fila de gráficos crezca descontroladamente */
-      .charts-row {
-        max-height: 400px; /* Limita la altura de toda la sección */
-        overflow: hidden; /* Corta cualquier elemento rebelde */
-      }
+<!-- â”€â”€ TOPBAR â”€â”€ -->
+<header class="topbar">
+  <label class="menu-button" for="navToggle" aria-label="Abrir menÃº">â˜°</label>
+  <div class="brand">
+    <span class="brand-badge">LSCC</span>
+    <div>
+      <h1>{% if rol == 'usuario' %}Portal ciudadano LSCC{% else %}Centro de monitoreo urbano{% endif %}</h1>
+      <p>{% if rol == 'usuario' %}Reporta y consulta incidencias de tu ciudad{% else %}Plataforma IoT de monitoreo urbano{% endif %}</p>
+    </div>
+  </div>
+  <div class="status-box">
+    <span class="user-pill">{{ username }} Â· {{ rol }}</span>
+    <a class="nav-link" href="/">Dashboard</a>
+    {% if rol == 'usuario' %}
+      <a class="nav-link" href="/nuevo-reporte">Nuevo reporte</a>
+      <a class="nav-link" href="/reportes">Mis reportes</a>
+    {% elif rol == 'trabajador' %}
+      <a class="nav-link" href="/reportes">Atender reportes</a>
+    {% elif rol == 'admin' %}
+      <a class="nav-link" href="/reportes">Reportes</a>
+      <a class="nav-link" href="/usuarios">Trabajadores</a>
+    {% endif %}
+    {% if rol in ['admin', 'trabajador'] %}
+    <span id="mqttStatus" class="pill">MQTT</span>
+    <span id="lastUpdate" class="last-update-txt">Sin datos</span>
+    {% endif %}
+    <form class="logout-form" method="POST" action="/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="logout-link" type="submit">Cerrar sesiÃ³n</button>
+    </form>
+  </div>
+</header>
 
-      /* 2. Forzamos a que el panel del log tenga una estructura rígida */
-      .charts-row .panel {
-        display: flex;
-        flex-direction: column;
-        height: 380px; /* Altura fija idéntica para el gráfico y el log */
-        box-sizing: border-box;
-      }
+<!-- â”€â”€ SECTION NAV â”€â”€ -->
+{% if rol in ['admin', 'trabajador'] %}
+<nav class="section-nav">
+  <a href="#sec-camara"    class="snav-link">CÃ¡mara</a>
+  <a href="#sec-ambiental" class="snav-link">Ambiental</a>
+  <a href="#sec-residuos"  class="snav-link">Residuos</a>
+  <a href="#sec-sonido"    class="snav-link">Sonido</a>
+  <a href="#sec-log"       class="snav-link">Log</a>
+</nav>
+{% endif %}
 
-      .charts-row .panel h2 {
-        margin-top: 0;
-        margin-bottom: 10px;
-        flex-shrink: 0; /* Evita que el título desaparezca */
-      }
+<main class="container">
 
-      /* 3. El contenedor del log ahora ocupará todo el espacio disponible del panel y tendrá su scroll */
-      .log-container {
-        flex-grow: 1; /* Ocupa todo el alto restante del panel */
-        overflow-y: auto; /* Activa la barra deslizante vertical obligatoria */
-        border: 1px solid rgba(0, 0, 0, 0.1);
-        background-color: #fcfcfc;
-        padding: 10px;
-        border-radius: 6px;
-      }
-
-      #logList.log {
-        margin: 0;
-        padding-left: 20px;
-      }
-
-      /* 4. Parche por si Chart.js intenta estirar el canvas infinitamente */
-      .charts-row canvas {
-        max-height: 320px !important;
-        width: 100% !important;
-      }
-    </style>
-  </head>
-  <body>
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-badge">LSCC</span>
-        <div>
-          <h1>Lima Smart Core City</h1>
-          <p>Dashboard MQTT para sensores IoT, residuos, sonido y cámara</p>
-        </div>
+  {% if rol == 'usuario' %}
+  <section class="citizen-hero" aria-labelledby="citizenWelcome">
+    <div class="citizen-hero-copy">
+      <span class="section-label">ParticipaciÃ³n ciudadana</span>
+      <h2 id="citizenWelcome">Hola, {{ username }}. AyÃºdanos a cuidar tu ciudad.</h2>
+      <p>Comunica una incidencia de ambiente, residuos o vigilancia. El equipo responsable podrÃ¡ revisarla y mantenerte al tanto de su atenciÃ³n.</p>
+      <div class="citizen-actions">
+        <a class="primary-action" href="/nuevo-reporte">Crear nuevo reporte</a>
+        <a class="secondary-action" href="/reportes">Consultar mis reportes</a>
       </div>
-      <div class="status-box">
-        <span class="user-pill">{{ username }} · {{ rol }}</span>
-        <a class="nav-link" href="/">Dashboard</a>
-        {% if rol == 'usuario' %}
-        <a class="nav-link" href="/nuevo-reporte">Nuevo reporte</a>
-        <a class="nav-link" href="/reportes">Mis reportes</a>
-        {% elif rol == 'trabajador' %}
-        <a class="nav-link" href="/reportes">Atender reportes</a>
-        {% elif rol == 'admin' %}
-        <a class="nav-link" href="/reportes">Reportes</a>
-        <a class="nav-link" href="/usuarios">Trabajadores</a>
-        {% endif %}
-        <span id="mqttStatus" class="pill">MQTT</span>
-        <span id="lastUpdate">Sin datos</span>
-        <form class="logout-form" method="POST" action="/logout">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="logout-link" type="submit">Cerrar sesión</button>
-        </form>
+    </div>
+    <div class="citizen-symbol" aria-hidden="true"><span>LSCC</span><small>Tu ciudad, conectada contigo</small></div>
+  </section>
+
+  <section class="citizen-summary" aria-label="CÃ³mo usar la plataforma">
+    <article><span class="step-number">1</span><div><h3>Identifica</h3><p>Selecciona la categorÃ­a que mejor describe la incidencia.</p></div></article>
+    <article><span class="step-number">2</span><div><h3>Describe</h3><p>Indica la ubicaciÃ³n y aÃ±ade informaciÃ³n clara para facilitar la atenciÃ³n.</p></div></article>
+    <article><span class="step-number">3</span><div><h3>Consulta</h3><p>Revisa el estado y las observaciones desde â€œMis reportesâ€.</p></div></article>
+  </section>
+
+  <section class="citizen-report-summary" aria-label="Resumen de mis reportes">
+    <div><span>Mis reportes</span><strong>{{ contadores.total }}</strong></div>
+    <div><span>Pendientes</span><strong>{{ contadores.pendiente }}</strong></div>
+    <div><span>En revisiÃ³n</span><strong>{{ contadores.en_revision }}</strong></div>
+    <div><span>Atendidos</span><strong>{{ contadores.atendido }}</strong></div>
+  </section>
+  {% else %}
+
+  <!-- CONTADOR DE REPORTES -->
+  <section class="quick-stats">
+    <article class="qs-card">
+      <span>Total reportes</span>
+      <strong>{{ contadores.total }}</strong>
+      <small>{% if rol in ['admin','trabajador'] %}Todos los registrados{% else %}Tus reportes{% endif %}</small>
+    </article>
+    <article class="qs-card qs-warn">
+      <span>Pendientes</span>
+      <strong>{{ contadores.pendiente }}</strong>
+      <small>Necesitan revisiÃ³n</small>
+    </article>
+    <article class="qs-card qs-info">
+      <span>En revisiÃ³n</span>
+      <strong>{{ contadores.en_revision }}</strong>
+      <small>En proceso de atenciÃ³n</small>
+    </article>
+    <article class="qs-card qs-ok">
+      <span>Atendidos</span>
+      <strong>{{ contadores.atendido }}</strong>
+      <small>Casos cerrados</small>
+    </article>
+  </section>
+
+  <!-- PANEL DE ACCIONES -->
+  {% if rol in ['admin', 'trabajador'] %}
+  <section class="panel action-panel">
+    <span class="section-label">{% if rol == 'admin' %}Panel administrativo{% else %}Panel de trabajador{% endif %}</span>
+    <p>{% if rol == 'admin' %}Supervisa sensores, usuarios internos y reportes para decidir prioridades operativas.{% else %}Revisa reportes ciudadanos, cambia estados y registra observaciones de atenciÃ³n.{% endif %}</p>
+    <div class="quick-actions">
+      <a href="/reportes?estado=pendiente">Revisar pendientes</a>
+      <a href="/reportes?categoria=residuos">Reportes de residuos</a>
+      <a href="/reportes?categoria=ambiental">Reportes ambientales</a>
+      <a href="/reportes?categoria=vigilancia">Reportes de vigilancia</a>
+    </div>
+  </section>
+  {% else %}
+  <section class="panel action-panel">
+    <span class="section-label">ParticipaciÃ³n ciudadana</span>
+    <p>Registra incidencias de tu zona para que el equipo de trabajo las revise y atienda.</p>
+    <div class="quick-actions">
+      <a href="/nuevo-reporte">Enviar nuevo reporte</a>
+      <a href="/reportes">Ver mis reportes</a>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+       MÃ“DULO: CÃMARA
+  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <section id="sec-camara" class="module mod-vigilancia">
+    <div class="mod-header">
+      <div class="mod-title">
+        <span class="mod-tag tag-vigilancia">Vigilancia</span>
+        <h2>CÃ¡mara ESP32-CAM</h2>
       </div>
-    </header>
+      <span id="camLivePill" class="pill">Sin seÃ±al</span>
+    </div>
+    <div class="camera-box">
+      <img id="cameraImage" src="http://192.168.100.125/stream" alt="Stream ESP32-CAM"/>
+    </div>
+    <p class="camera-meta"><span id="imgMeta">Conectando al stream...</span></p>
+  </section>
 
-    <main class="container">
-      <section class="decision-strip">
-        <article class="decision-card">
-          <span>Reportes totales</span>
-          <strong>{{ contadores.total }}</strong>
-          <small
-            >{% if rol == 'admin' %}Todos los reportes registrados{% else %}Tus
-            reportes enviados{% endif %}</small
-          >
-        </article>
-        <article class="decision-card urgent">
-          <span>Pendientes</span>
-          <strong>{{ contadores.pendiente }}</strong>
-          <small>Necesitan revisión</small>
-        </article>
-        <article class="decision-card review">
-          <span>En revisión</span>
-          <strong>{{ contadores.en_revision }}</strong>
-          <small>En proceso de atención</small>
-        </article>
-        <article class="decision-card ok">
-          <span>Atendidos</span>
-          <strong>{{ contadores.atendido }}</strong>
-          <small>Casos cerrados</small>
-        </article>
-      </section>
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+       MÃ“DULO: AMBIENTAL
+  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <section id="sec-ambiental" class="module mod-ambiental">
+    <div class="mod-header">
+      <div class="mod-title">
+        <span class="mod-tag tag-ambiental">Ambiental</span>
+        <h2>Calidad de aire y variables fÃ­sicas</h2>
+      </div>
+      <div class="mod-right">
+        <span id="airQualityBadge" class="quality-badge">--</span>
+        <span id="ambientalNodeDot" class="node-dot offline" title="ESP32_AIRE_01"></span>
+      </div>
+    </div>
 
-      {% if rol in ['admin', 'trabajador'] %}
-      <section class="panel decision-panel">
-        <span class="section-label">Toma de decisiones</span>
-        <h2>
-          {% if rol == 'admin' %}Panel administrativo{% else %}Panel de
-          trabajador{% endif %}
-        </h2>
-        <p>
-          {% if rol == 'admin' %}Supervisa sensores, usuarios internos y
-          reportes para decidir prioridades operativas.{% else %}Revisa reportes
-          ciudadanos, cambia estados y registra observaciones de atención.{%
-          endif %}
-        </p>
-        <div class="quick-actions">
-          <a href="/reportes?estado=pendiente">Revisar pendientes</a>
-          <a href="/reportes?categoria=residuos">Ver reportes de residuos</a>
-          <a href="/reportes?categoria=ambiental">Ver reportes ambientales</a>
-          <a href="/reportes?categoria=vigilancia"
-            >Ver reportes de vigilancia</a
-          >
+    <!-- Info del nodo -->
+    <div class="node-bar">
+      <div class="nb-item">
+        <span class="nb-label">Nodo</span>
+        <span class="nb-value">ESP32_AIRE_01</span>
+      </div>
+      <div class="nb-item">
+        <span class="nb-label">Sensores activos</span>
+        <span id="ambSensoresActivos" class="nb-value nb-count">-- / 4</span>
+      </div>
+      <div class="nb-chips">
+        <span id="chipDHT22"  class="sensor-chip offline">DHT22</span>
+        <span id="chipBMP280" class="sensor-chip offline">BMP280</span>
+        <span id="chipMQ2"    class="sensor-chip offline">MQ-2</span>
+      </div>
+      <div class="nb-item">
+        <span class="nb-label">Ãšltima lectura</span>
+        <span id="ambLastSeen" class="nb-value">--</span>
+      </div>
+    </div>
+
+    <!-- MÃ©tricas ambientales -->
+    <div class="ambient-grid">
+      <article class="metric-card">
+        <span class="mc-label">Temperatura</span>
+        <strong id="temperatura" class="mc-value">--</strong>
+        <small>Â°C Â· DHT22</small>
+        <div class="mc-bar"><span id="temperaturaBar" class="bar-fill"></span></div>
+      </article>
+      <article class="metric-card">
+        <span class="mc-label">Humedad</span>
+        <strong id="humedad" class="mc-value">--</strong>
+        <small>%HR Â· DHT22</small>
+        <div class="mc-bar"><span id="humedadBar" class="bar-fill"></span></div>
+      </article>
+      <article class="metric-card">
+        <span class="mc-label">PresiÃ³n</span>
+        <strong id="presion" class="mc-value">--</strong>
+        <small>hPa Â· BMP280</small>
+        <div class="mc-bar"><span id="presionBar" class="bar-fill bar-neutral"></span></div>
+      </article>
+      <article class="metric-card">
+        <span class="mc-label">Gas MQ-2</span>
+        <strong id="gasNivel" class="mc-value">--</strong>
+        <small id="gasDetalle">ADC: -- Â· V: --</small>
+        <div class="mc-bar"><span id="gasBar" class="bar-fill"></span></div>
+      </article>
+    </div>
+
+    <!-- Historial ambiental -->
+    <article class="chart-card">
+      <h3>Historial ambiental</h3>
+      <div class="chart-wrap"><canvas id="chartAmbiental"></canvas></div>
+    </article>
+  </section>
+
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+       MÃ“DULO: RESIDUOS
+  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <section id="sec-residuos" class="module mod-residuos">
+    <div class="mod-header">
+      <div class="mod-title">
+        <span class="mod-tag tag-residuos">Residuos</span>
+        <h2>Monitoreo de contenedores</h2>
+      </div>
+      <span id="residuosNodeDot" class="node-dot offline" title="ESP32_RESIDUOS_01"></span>
+    </div>
+
+    <!-- Resumen para toma de decisiones -->
+    <div class="res-overview">
+      <div class="ro-item">
+        <span class="ro-label">Nodo</span>
+        <span class="ro-value">ESP32_RESIDUOS_01</span>
+      </div>
+      <div class="ro-item">
+        <span class="ro-label">Sensores activos</span>
+        <strong id="resSensoresActivos" class="ro-value">-- / 4</strong>
+      </div>
+      <div class="ro-item">
+        <span class="ro-label">Llenado promedio</span>
+        <strong id="resPromedio" class="ro-value">--%</strong>
+      </div>
+      <div class="ro-item ro-alert-item">
+        <span class="ro-label">Requieren vaciado</span>
+        <strong id="resAlerta" class="ro-value">0</strong>
+      </div>
+    </div>
+
+    <!-- Tarjetas de tacho -->
+    <div class="trash-grid">
+      <article class="trash-card" id="tachoCard1">
+        <div class="tc-top">
+          <span class="tc-label">Tacho 1</span>
+          <span id="tacho1NivelTxt" class="mini-pill">--</span>
         </div>
-      </section>
-      {% else %}
-      <section class="panel decision-panel">
-        <span class="section-label">Participación ciudadana</span>
-        <h2>Reporta problemas de tu zona</h2>
-        <p>
-          Además de consultar el resumen del sistema, puedes registrar
-          incidencias de residuos, ambiente o seguridad para que el
-          administrador las revise.
-        </p>
-        <div class="quick-actions">
-          <a href="/nuevo-reporte">Enviar nuevo reporte</a>
-          <a href="/reportes">Ver mis reportes</a>
+        <div class="tc-body">
+          <div class="tc-fill-wrap">
+            <div id="tacho1Fill" class="tc-fill-bar" style="height:0%"></div>
+          </div>
+          <strong id="tacho1Porcentaje" class="tc-pct">--</strong>
         </div>
-      </section>
-      {% endif %}
+        <div class="progress tc-progress"><span id="tacho1Bar"></span></div>
+        <small id="tacho1Detalle" class="tc-detail">Distancia: -- cm Â· Ãšltima: --</small>
+      </article>
 
-      <section class="hero-grid">
-        <article class="panel camera-panel">
-          <div class="panel-head">
-            <div>
-              <span class="section-label">Vigilancia</span>
-              <h2>Cámara ESP32-CAM</h2>
-            </div>
-            <span id="imgMeta">Esperando imagen...</span>
+      <article class="trash-card" id="tachoCard2">
+        <div class="tc-top">
+          <span class="tc-label">Tacho 2</span>
+          <span id="tacho2NivelTxt" class="mini-pill">--</span>
+        </div>
+        <div class="tc-body">
+          <div class="tc-fill-wrap">
+            <div id="tacho2Fill" class="tc-fill-bar" style="height:0%"></div>
           </div>
-          <div class="camera-box">
-            <img id="cameraImage" src="/imagen" alt="Última imagen recibida" />
+          <strong id="tacho2Porcentaje" class="tc-pct">--</strong>
+        </div>
+        <div class="progress tc-progress"><span id="tacho2Bar"></span></div>
+        <small id="tacho2Detalle" class="tc-detail">Distancia: -- cm Â· Ãšltima: --</small>
+      </article>
+
+      <article class="trash-card" id="tachoCard3">
+        <div class="tc-top">
+          <span class="tc-label">Tacho 3</span>
+          <span id="tacho3NivelTxt" class="mini-pill">--</span>
+        </div>
+        <div class="tc-body">
+          <div class="tc-fill-wrap">
+            <div id="tacho3Fill" class="tc-fill-bar" style="height:0%"></div>
           </div>
-        </article>
+          <strong id="tacho3Porcentaje" class="tc-pct">--</strong>
+        </div>
+        <div class="progress tc-progress"><span id="tacho3Bar"></span></div>
+        <small id="tacho3Detalle" class="tc-detail">Distancia: -- cm Â· Ãšltima: --</small>
+      </article>
 
-        <article class="panel node-panel">
-          <div class="panel-head">
-            <div>
-              <span class="section-label">Nodo</span>
-              <h2>Estado general</h2>
-            </div>
+      <article class="trash-card" id="tachoCard4">
+        <div class="tc-top">
+          <span class="tc-label">Tacho 4</span>
+          <span id="tacho4NivelTxt" class="mini-pill">--</span>
+        </div>
+        <div class="tc-body">
+          <div class="tc-fill-wrap">
+            <div id="tacho4Fill" class="tc-fill-bar" style="height:0%"></div>
           </div>
-          <div class="info-list">
-            <p><b>Device ID:</b> <span id="deviceId">--</span></p>
-            <p><b>Último tópico:</b> <span id="ultimoTopico">--</span></p>
-            <p><b>Estado sistema:</b> <span id="estadoSistema">--</span></p>
-            <p><b>Acceso:</b> visible en la red local</p>
-          </div>
-        </article>
-      </section>
+          <strong id="tacho4Porcentaje" class="tc-pct">--</strong>
+        </div>
+        <div class="progress tc-progress"><span id="tacho4Bar"></span></div>
+        <small id="tacho4Detalle" class="tc-detail">Distancia: -- cm &middot; &Uacute;ltima: --</small>
+      </article>
 
-      <section class="section-title">
-        <span>Mediciones ambientales</span>
-        <h2>Calidad de aire y variables físicas</h2>
-      </section>
+    </div>
 
-      <section class="grid cards ambient-cards">
-        <article class="card metric-card">
-          <span class="label">Temperatura</span>
-          <strong id="temperatura">--</strong>
-          <small>°C - DHT22 / BMP280</small>
-        </article>
+    <!-- Historial residuos -->
+    <article class="chart-card">
+      <h3>Historial de residuos por tacho</h3>
+      <div class="chart-wrap"><canvas id="chartResiduos"></canvas></div>
+    </article>
+  </section>
 
-        <article class="card metric-card">
-          <span class="label">Humedad</span>
-          <strong id="humedad">--</strong>
-          <small>%HR - DHT22</small>
-        </article>
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+       MÃ“DULO: SONIDO
+  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <section id="sec-sonido" class="module mod-sonido">
+    <div class="mod-header">
+      <div class="mod-title">
+        <span class="mod-tag tag-sonido">Sonido</span>
+        <h2>Sensor KY-037</h2>
+      </div>
+      <span id="sonidoNodeDot" class="node-dot offline" title="ESP32_KY037_01"></span>
+    </div>
 
-        <article class="card metric-card">
-          <span class="label">Presión</span>
-          <strong id="presion">--</strong>
-          <small>hPa - BMP280</small>
-        </article>
+    <div class="sound-grid">
+      <article class="sound-main metric-card">
+        <span class="mc-label">Nivel de sonido</span>
+        <strong id="sonidoPorcentaje" class="mc-value">--</strong>
+        <div class="mc-bar"><span id="sonidoBar" class="bar-fill"></span></div>
+        <small id="sonidoEstado">Evento: --</small>
+      </article>
+      <article class="metric-card">
+        <span class="mc-label">Valor RAW ADC</span>
+        <strong id="sonidoRaw" class="mc-value">--</strong>
+        <small>Rango ESP32: 0 â€“ 4095</small>
+      </article>
+      <article class="metric-card">
+        <span class="mc-label">Voltaje</span>
+        <strong id="sonidoVoltaje" class="mc-value">--</strong>
+        <small>Salida AO del KY-037</small>
+      </article>
+      <article class="metric-card">
+        <span class="mc-label">ClasificaciÃ³n</span>
+        <strong id="sonidoNivel" class="mc-value">--</strong>
+        <small>SegÃºn umbrales del sensor</small>
+      </article>
+    </div>
 
-        <article class="card metric-card">
-          <span class="label">Gas MQ-2</span>
-          <strong id="gasNivel">--</strong>
-          <small id="gasDetalle">ADC: -- | V: --</small>
-        </article>
-      </section>
+    <article class="chart-card">
+      <h3>Historial de sonido</h3>
+      <div class="chart-wrap"><canvas id="chartSonido"></canvas></div>
+    </article>
+  </section>
 
-      <section class="section-title">
-        <span>Residuos</span>
-        <h2>Monitoreo independiente de los 4 tachos</h2>
-      </section>
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+       MÃ“DULO: LOG
+  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <section id="sec-log" class="module mod-log">
+    <div class="mod-header">
+      <div class="mod-title">
+        <span class="mod-tag tag-log">Sistema</span>
+        <h2>Log de recepciÃ³n MQTT</h2>
+      </div>
+    </div>
+    <div class="log-container">
+      <ul id="logList" class="log"></ul>
+    </div>
+  </section>
 
-      <section class="grid trash-grid">
-        <article class="card trash-card" data-tacho="1">
-          <div class="card-top">
-            <span class="label">Tacho 1</span
-            ><span id="tacho1NivelTxt" class="mini-pill">--</span>
-          </div>
-          <strong id="tacho1Porcentaje">--</strong>
-          <div class="progress"><span id="tacho1Bar"></span></div>
-          <small id="tacho1Detalle">Distancia: -- cm | Última: --</small>
-        </article>
-        <article class="card trash-card" data-tacho="2">
-          <div class="card-top">
-            <span class="label">Tacho 2</span
-            ><span id="tacho2NivelTxt" class="mini-pill">--</span>
-          </div>
-          <strong id="tacho2Porcentaje">--</strong>
-          <div class="progress"><span id="tacho2Bar"></span></div>
-          <small id="tacho2Detalle">Distancia: -- cm | Última: --</small>
-        </article>
-        <article class="card trash-card" data-tacho="3">
-          <div class="card-top">
-            <span class="label">Tacho 3</span
-            ><span id="tacho3NivelTxt" class="mini-pill">--</span>
-          </div>
-          <strong id="tacho3Porcentaje">--</strong>
-          <div class="progress"><span id="tacho3Bar"></span></div>
-          <small id="tacho3Detalle">Distancia: -- cm | Última: --</small>
-        </article>
-        <article class="card trash-card" data-tacho="4">
-          <div class="card-top">
-            <span class="label">Tacho 4</span
-            ><span id="tacho4NivelTxt" class="mini-pill">--</span>
-          </div>
-          <strong id="tacho4Porcentaje">--</strong>
-          <div class="progress"><span id="tacho4Bar"></span></div>
-          <small id="tacho4Detalle">Distancia: -- cm | Última: --</small>
-        </article>
-      </section>
+  {% endif %}
+</main>
 
-      <section class="section-title">
-        <span>Sonido</span>
-        <h2>Lectura analógica KY-037</h2>
-      </section>
-
-      <section class="grid sound-grid">
-        <article class="card sound-main">
-          <span class="label">Nivel de sonido</span>
-          <strong id="sonidoPorcentaje">--</strong>
-          <div class="progress sound-progress">
-            <span id="sonidoBar"></span>
-          </div>
-          <small id="sonidoEstado">Evento: --</small>
-        </article>
-        <article class="card">
-          <span class="label">Valor RAW ADC</span>
-          <strong id="sonidoRaw">--</strong>
-          <small>Rango ESP32: 0 a 4095</small>
-        </article>
-        <article class="card">
-          <span class="label">Voltaje</span>
-          <strong id="sonidoVoltaje">--</strong>
-          <small>Salida AO del KY-037</small>
-        </article>
-        <article class="card">
-          <span class="label">Clasificación</span>
-          <strong id="sonidoNivel">--</strong>
-          <small>Según umbrales del código</small>
-        </article>
-      </section>
-
-      <section class="grid two-columns charts-row">
-        <article class="panel">
-          <h2>Historial ambiental</h2>
-          <canvas id="chartAmbiental"></canvas>
-        </article>
-
-        <article class="panel">
-          <h2>Historial de residuos por tacho</h2>
-          <canvas id="chartResiduos"></canvas>
-        </article>
-      </section>
-
-      <section class="grid two-columns charts-row">
-        <article class="panel">
-          <h2>Historial de sonido</h2>
-          <canvas id="chartSonido"></canvas>
-        </article>
-
-        <article class="panel">
-          <h2>Log de recepción MQTT</h2>
-          <div class="log-container">
-            <ul id="logList" class="log"></ul>
-          </div>
-        </article>
-      </section>
-    </main>
-
-    <script src="/static/app.js"></script>
-  </body>
+{% if rol in ['admin', 'trabajador'] %}<script src="/static/app.js"></script>{% endif %}
+</body>
 </html>

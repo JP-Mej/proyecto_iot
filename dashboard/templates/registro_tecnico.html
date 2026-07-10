@@ -1,0 +1,6 @@
+{% set active_page = 'registro' %}{% set requires_charts = false %}{% extends "base_dashboard.html" %}
+{% block title %}Registro técnico{% endblock %}{% block heading %}Registro técnico{% endblock %}{% block subheading %}Mensajes MQTT y eventos internos existentes{% endblock %}
+{% block content %}
+<header class="page-heading"><div><span class="mod-tag tag-log">Sistema</span><h1>Registro técnico</h1><p>Actividad técnica y mensajes recibidos por el dashboard.</p></div></header>
+<section id="sec-log" class="module mod-log module-page"><div class="log-container"><ul id="logList" class="log"></ul></div></section>
+{% endblock %}

@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <style>
+      .bg { fill: #f5f7fb; }
+      .title { font: 700 42px Arial, sans-serif; fill: #172033; }
+      .subtitle { font: 400 22px Arial, sans-serif; fill: #526070; }
+      .section { font: 700 24px Arial, sans-serif; fill: #172033; }
+      .label { font: 700 22px Arial, sans-serif; fill: #172033; }
+      .small { font: 400 18px Arial, sans-serif; fill: #405064; }
+      .tiny { font: 400 15px Arial, sans-serif; fill: #526070; }
+      .chip { font: 700 15px Arial, sans-serif; fill: #ffffff; }
+      .card { fill: #ffffff; stroke: #d9e2ef; stroke-width: 2; }
+      .sensor { fill: #e8f5ee; stroke: #45a16c; stroke-width: 2; }
+      .camera { fill: #eaf1ff; stroke: #4776d0; stroke-width: 2; }
+      .waste { fill: #fff3dd; stroke: #d58b23; stroke-width: 2; }
+      .broker { fill: #f0edff; stroke: #7564d8; stroke-width: 2; }
+      .dash { fill: #e7f7fb; stroke: #2899ad; stroke-width: 2; }
+      .data { fill: #eef2f7; stroke: #64748b; stroke-width: 2; }
+      .ml { fill: #fcebf2; stroke: #c54a7b; stroke-width: 2; }
+      .arrow { stroke: #334155; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+      .arrow2 { stroke: #64748b; stroke-width: 3; fill: none; marker-end: url(#arrow); stroke-dasharray: 10 8; }
+      .band { fill: #172033; opacity: 0.06; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#334155"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.13"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="1000"/>
+  <rect class="band" x="0" y="0" width="1600" height="145"/>
+  <text class="title" x="80" y="72">Lima Smart Core City - Arquitectura IoT, MQTT, Dashboard y Modelos ML</text>
+  <text class="subtitle" x="82" y="112">Flujo general de sensores ESP32, broker Mosquitto, procesamiento Python/Flask, base de datos y visualización web</text>
+
+  <text class="section" x="95" y="185">1. Capa IoT</text>
+  <text class="section" x="555" y="185">2. Comunicación</text>
+  <text class="section" x="900" y="185">3. Backend y Datos</text>
+  <text class="section" x="1235" y="185">4. IA y Visualización</text>
+
+  <g filter="url(#shadow)">
+    <rect class="sensor" x="80" y="225" width="360" height="155" rx="16"/>
+    <text class="label" x="112" y="265">Modulo Ambiental</text>
+    <text class="small" x="112" y="302">ESP32 + DHT22 + BMP280 + MQ-2</text>
+    <text class="tiny" x="112" y="334">Temperatura, humedad, presion, gas</text>
+    <rect x="112" y="348" width="88" height="24" rx="12" fill="#45a16c"/>
+    <text class="chip" x="130" y="366">MQTT</text>
+
+    <rect class="camera" x="80" y="430" width="360" height="155" rx="16"/>
+    <text class="label" x="112" y="470">Modulo Camara</text>
+    <text class="small" x="112" y="507">ESP32-CAM AI Thinker</text>
+    <text class="tiny" x="112" y="539">Stream MJPEG + estado del dispositivo</text>
+    <rect x="112" y="553" width="92" height="24" rx="12" fill="#4776d0"/>
+    <text class="chip" x="129" y="571">HTTP</text>
+
+    <rect class="waste" x="80" y="635" width="360" height="155" rx="16"/>
+    <text class="label" x="112" y="675">Modulo Residuos</text>
+    <text class="small" x="112" y="712">ESP32 + 3 sensores HC-SR04</text>
+    <text class="tiny" x="112" y="744">Distancia, porcentaje de llenado, nivel</text>
+    <rect x="112" y="758" width="88" height="24" rx="12" fill="#d58b23"/>
+    <text class="chip" x="130" y="776">MQTT</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="broker" x="550" y="345" width="260" height="190" rx="18"/>
+    <text class="label" x="595" y="390">Broker MQTT</text>
+    <text class="small" x="594" y="427">Mosquitto</text>
+    <text class="tiny" x="594" y="460">Puerto 1883</text>
+    <text class="tiny" x="594" y="487">Topicos: lscc/#</text>
+    <rect x="594" y="502" width="118" height="24" rx="12" fill="#7564d8"/>
+    <text class="chip" x="612" y="520">lscc_user</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="dash" x="900" y="250" width="300" height="170" rx="18"/>
+    <text class="label" x="942" y="295">Dashboard Flask</text>
+    <text class="small" x="942" y="332">Cliente MQTT Python</text>
+    <text class="tiny" x="942" y="363">Recibe mensajes, procesa JSON</text>
+    <text class="tiny" x="942" y="390">Sirve la interfaz web</text>
+
+    <rect class="data" x="900" y="490" width="300" height="155" rx="18"/>
+    <text class="label" x="953" y="535">SQLite / DB</text>
+    <text class="small" x="942" y="572">Historial de mediciones</text>
+    <text class="tiny" x="942" y="603">Dispositivos, alertas, usuarios</text>
+
+    <rect class="ml" x="900" y="710" width="300" height="155" rx="18"/>
+    <text class="label" x="948" y="755">Modelos ML</text>
+    <text class="small" x="942" y="792">Ambiental + Residuos</text>
+    <text class="tiny" x="942" y="823">Clasificacion, prediccion, anomalias</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect class="ml" x="1280" y="250" width="250" height="170" rx="18"/>
+    <text class="label" x="1318" y="295">DL / Vision</text>
+    <text class="small" x="1318" y="332">Analisis de frames</text>
+    <text class="tiny" x="1318" y="363">Personas, eventos, alertas</text>
+
+    <rect class="dash" x="1280" y="515" width="250" height="175" rx="18"/>
+    <text class="label" x="1328" y="560">Pagina Web</text>
+    <text class="small" x="1318" y="597">Tarjetas, graficas</text>
+    <text class="tiny" x="1318" y="628">Estado en tiempo real</text>
+    <text class="tiny" x="1318" y="655">Predicciones y alertas</text>
+  </g>
+
+  <path class="arrow" d="M440 302 C485 302, 500 410, 550 410"/>
+  <path class="arrow" d="M440 712 C490 712, 500 500, 550 500"/>
+  <path class="arrow2" d="M440 505 C510 505, 800 255, 900 315"/>
+  <path class="arrow" d="M810 440 C850 440, 860 335, 900 335"/>
+  <path class="arrow" d="M1050 420 L1050 490"/>
+  <path class="arrow" d="M1050 645 L1050 710"/>
+  <path class="arrow" d="M1200 790 C1245 790, 1238 620, 1280 620"/>
+  <path class="arrow" d="M1200 335 L1280 335"/>
+  <path class="arrow2" d="M1280 600 C1238 600, 1245 345, 1200 345"/>
+
+  <g>
+    <rect class="card" x="510" y="820" width="340" height="95" rx="14"/>
+    <text class="small" x="538" y="858">WiFiManager + Preferences</text>
+    <text class="tiny" x="538" y="886">Permite cambiar WiFi, broker, usuario y clave sin recompilar.</text>
+  </g>
+
+  <g>
+    <rect class="card" x="80" y="845" width="360" height="70" rx="14"/>
+    <text class="small" x="110" y="875">ESP32 publica datos por topicos MQTT</text>
+    <text class="tiny" x="110" y="900">Ejemplo: lscc/ambiental/gas, lscc/residuos/nivel</text>
+  </g>
+
+  <g>
+    <rect class="card" x="1235" y="760" width="300" height="95" rx="14"/>
+    <text class="small" x="1264" y="798">Resultado en dashboard</text>
+    <text class="tiny" x="1264" y="826">Estado actual, alertas, recomendaciones</text>
+  </g>
+
+  <text class="tiny" x="82" y="965">Archivo generado para documentacion del proyecto. Arquitectura referencial: ESP32 -> MQTT -> Dashboard -> DB -> Modelos ML/DL -> Web.</text>
+</svg>

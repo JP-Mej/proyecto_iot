@@ -1,212 +1,189 @@
-# Lima Smart Core City — Fase 1
+# Lima Smart Core City (LSCC)
 
-## Estructura de archivos
+Plataforma IoT académica alineada con el modelo de referencia de cuatro capas de ITU-T Y.2060. Integra sensores ESP32, MQTT, Flask, SQLite, un data lake en Amazon S3, Athena y una futura capa analítica en Power BI.
 
-```
-lima_smart_fase1/
-│
-├── arduino/
-│   ├── ambiental/     MQ2_BMP280_DHT22.ino  ← ESP32 módulo ambiental
-│   ├── residuos/      HCR_04.ino            ← ESP32 módulo residuos
-│   ├── camara/        CAMARA.ino            ← ESP32-CAM módulo cámara
-│   └── ky037/         KY037.ino             ← ESP32 módulo sonido
-│
-├── dashboard/
-│   ├── app.py                ← Flask + MQTT + SQLite
-│   ├── mosquitto.conf        ← Config broker con auth
-│   ├── mosquitto_passwd.txt  ← Contraseñas broker (regenerar)
-│   ├── requirements.txt
-│   ├── iniciar_dashboard.bat
-│   ├── templates/            (copiar de versión anterior)
-│   └── static/               (copiar de versión anterior)
-│
-└── db/
-    ├── crear_db.py   ← Crea lscc.db con todas las tablas
-    └── ver_db.py     ← Diagnóstico de la base de datos
-```
+Versión de trabajo: `0.2.0-consolidacion-fase1`.
 
----
+Punto de retorno estable:
 
-## Paso a paso de implementación
+- Tag Git: `v0.1.0-pre-consolidacion`
+- Commit: `54ea5af`
+- Respaldo: `versiones/LSCC_v0.1.0-pre-consolidacion.zip`
 
-### PASO 1 — Instalar Mosquitto con autenticación
+## Arquitectura actual
 
-**Windows:**
-1. Descargar Mosquitto desde https://mosquitto.org/download/
-2. Instalar con la opción "Add to PATH"
-3. Abrir PowerShell como administrador:
-
-```powershell
-# Generar archivo de contraseñas (ingresa "lscc2025" cuando pida)
-mosquitto_passwd -c "C:\Program Files\mosquitto\mosquitto_passwd.txt" lscc_user
-
-# Verificar que el servicio existe
-Get-Service -Name mosquitto
+```text
+Sensores
+  -> ESP32
+  -> Wi-Fi / IPv4 / TCP
+  -> MQTT / Mosquitto
+  -> Flask
+  -> SQLite
+  -> Bronze / Silver / Gold
+  -> Amazon S3 / Athena
+  -> Power BI
 ```
 
-4. Copiar `mosquitto.conf` de este proyecto a:
-   `C:\Program Files\mosquitto\mosquitto.conf`
+Módulos físicos:
 
-5. Editar el `mosquitto.conf` y cambiar la ruta del password_file:
-   ```
-   password_file C:\Program Files\mosquitto\mosquitto_passwd.txt
-   ```
+- Ambiental: DHT22, BMP280 y MQ-2.
+- Residuos: tres HC-SR04 configurados actualmente.
+- Videovigilancia: ESP32-CAM.
+- Sonido: KY-037 en un ESP32 independiente.
 
-6. Reiniciar el servicio:
-```powershell
-Stop-Service mosquitto
-Start-Service mosquitto
+## Configuración privada
 
-# Verificar que está corriendo
-Get-Service mosquitto
+Los secretos no deben escribirse en los archivos `.ino` ni publicarse en Git.
+
+- Dashboard: copiar `dashboard/.env.example` como `dashboard/.env`.
+- Cada sketch: copiar `secrets.h.example` como `secrets.h`.
+- Broker: generar `dashboard/mosquitto_passwd.txt` con `mosquitto_passwd`.
+
+Los archivos `.env`, `secrets.h`, la base SQLite, imágenes y adjuntos están ignorados por Git.
+
+## Preparación inicial en Windows (CMD)
+
+Instalar Mosquitto:
+
+```bat
+winget install --id EclipseFoundation.Mosquitto --exact --accept-package-agreements --accept-source-agreements
 ```
 
-7. Probar la autenticación:
-```powershell
-# En una terminal: suscribir
-mosquitto_sub -h 127.0.0.1 -p 1883 -u lscc_user -P lscc2025 -t "lscc/#" -v
+Instalar las dependencias Python:
 
-# En otra terminal: publicar
-mosquitto_pub -h 127.0.0.1 -p 1883 -u lscc_user -P lscc2025 -t "lscc/prueba" -m "hola"
-```
-Si ves "lscc/prueba hola" en la primera terminal, ¡el broker funciona!
-
----
-
-### PASO 2 — Crear el entorno Python y la base de datos
-
-```bash
-# Desde la carpeta dashboard/
-cd lima_smart_fase1/dashboard
-
-# Crear entorno virtual
-python -m venv venv
-
-# Activar (Windows)
-venv\Scripts\activate
-
-# Instalar dependencias
-pip install -r requirements.txt
-
-# Crear la base de datos (ejecutar DESDE la carpeta dashboard/)
-python ..\db\crear_db.py
+```bat
+cd dashboard
+python -m pip install -r requirements.txt
 ```
 
-Verás el mensaje:
+Si todavía no existe la base:
+
+```bat
+python crear_db.py
 ```
-✅  Listo. Ahora puedes iniciar el dashboard con: python app.py
+
+No ejecutes `crear_db.py` sobre una base con información sin realizar antes un respaldo.
+
+## Arranque diario
+
+Debe existir una sola instancia de Mosquitto. Para evitar que el servicio predeterminado compita con la configuración del proyecto, abre CMD como administrador y ejecuta:
+
+```bat
+net stop mosquitto
+netstat -ano | findstr :1883
 ```
 
-El archivo `lscc.db` debe quedar en la carpeta `dashboard/`.
+Desde `dashboard`, inicia el broker del proyecto:
 
----
+```bat
+"C:\Program Files\mosquitto\mosquitto.exe" -c mosquitto.conf -v
+```
 
-### PASO 3 — Iniciar el dashboard
+El resultado esperado es:
 
-```bash
-# Desde la carpeta dashboard/ con el venv activado:
+```text
+Opening ipv4 listen socket on port 1883
+mosquitto version 2.1.2 running
+```
+
+En otra ventana CMD, inicia Flask:
+
+```bat
+cd dashboard
 python app.py
-
-# O simplemente hacer doble clic en:
-iniciar_dashboard.bat
 ```
 
-Abrir en el navegador: http://localhost:5000
+Abrir únicamente:
 
----
-
-### PASO 4 — Instalar librería ArduinoJson en Arduino IDE
-
-1. Abrir Arduino IDE
-2. Ir a **Herramientas → Administrar bibliotecas...**
-3. Buscar "ArduinoJson"
-4. Instalar **ArduinoJson** de Benoit Blanchon (versión 6.x o 7.x)
-
----
-
-### PASO 5 — Cargar el código a los ESP32
-
-Para cada módulo:
-
-1. Abrir el archivo `.ino` correspondiente en Arduino IDE
-2. Verificar/cambiar estas constantes si tu red es diferente:
-   ```cpp
-   const char* WIFI_SSID     = "TU_RED_WIFI";
-   const char* WIFI_PASS     = "TU_CONTRASEÑA";
-   const char* MQTT_BROKER   = "IP_DE_TU_LAPTOP";
-   const char* MQTT_USER     = "lscc_user";
-   const char* MQTT_PASSWORD = "lscc2025";
-   ```
-3. Seleccionar la placa correcta:
-   - Módulo ambiental, residuos, KY-037: `ESP32 Dev Module`
-   - Cámara: `AI Thinker ESP32-CAM`
-4. Subir el sketch
-
-**Para el ESP32-CAM**: usar adaptador FTDI (USB-serial).
-Conectar GPIO0 a GND antes de encender para entrar en modo flash.
-Desconectar GPIO0 de GND después de cargar y resetear.
-
----
-
-### PASO 6 — Verificar que los datos se guardan en la DB
-
-Con el dashboard corriendo y los ESP32 encendidos, abrir otra terminal:
-
-```bash
-# Desde la carpeta db/ o pasando la ruta:
-cd lima_smart_fase1
-
-# Resumen general
-python db/ver_db.py
-
-# Ver lecturas de temperatura
-python db/ver_db.py temperatura
-
-# Ver estado de contenedores
-python db/ver_db.py residuos
-
-# Ver alertas activas
-python db/ver_db.py alertas
-
-# Ver estado de dispositivos
-python db/ver_db.py dispositivos
+```text
+http://127.0.0.1:5000/login
 ```
 
-También puedes consultar la API directamente:
-- http://localhost:5000/api/data          → Estado actual en memoria
-- http://localhost:5000/api/history/temperatura?limite=20  → Historial de DB
-- http://localhost:5000/api/alertas       → Alertas activas desde DB
-- http://localhost:5000/api/dispositivos  → Estado de dispositivos
+Las credenciales administrativas se encuentran en el `.env` local.
 
----
+## Prueba MQTT
 
-### PASO 7 — Encontrar la IP de tu laptop para los ESP32
+Suscripción:
 
-**Windows:**
-```powershell
-ipconfig
+```bat
+"C:\Program Files\mosquitto\mosquitto_sub.exe" -h 127.0.0.1 -p 1883 -u lscc_user -P "TU_CLAVE" -t "lscc/#" -v
 ```
-Buscar "Dirección IPv4" de la red Wi-Fi (ej: 192.168.100.99).
-Esa IP va en `MQTT_BROKER` de los sketches Arduino.
 
----
+Publicación de prueba:
 
-## Credenciales del sistema (Fase 1)
+```bat
+"C:\Program Files\mosquitto\mosquitto_pub.exe" -h 127.0.0.1 -p 1883 -u lscc_user -P "TU_CLAVE" -t "lscc/prueba" -m "hola"
+```
 
-| Parámetro    | Valor       |
-|---|---|
-| MQTT usuario | lscc_user   |
-| MQTT clave   | lscc2025    |
-| Broker IP    | IP de tu laptop |
-| Broker puerto| 1883        |
-| DB archivo   | lscc.db     |
+## Firmware ESP32
 
----
+Antes de compilar:
 
-## Notas importantes
+1. Verificar el `secrets.h` de cada sketch.
+2. Usar como broker la IPv4 actual de la PC obtenida con `ipconfig`.
+3. Confirmar que la contraseña coincide con `dashboard/.env` y `mosquitto_passwd.txt`.
+4. Cargar nuevamente los cuatro sketches después de modificar el firmware.
 
-- El KY-037 **NO** va en el ESP32-CAM (sin pines libres). Usa un ESP32 genérico.
-- El MQ-2 tarda **30 segundos** en calentarse. El módulo ambiental espera antes de publicar.
-- Si cambias la contraseña MQTT, actualízala en: `mosquitto.conf`, `mosquitto_passwd.txt`, los 4 `.ino` y el `iniciar_dashboard.bat`.
-- El archivo `lscc.db` **no** debe subirse a GitHub (contiene datos del sistema).
-- Los templates y archivos static (HTML, CSS, JS) son los mismos del dashboard anterior — cópialos a la carpeta `dashboard/`.
+Los equipos con WiFiManager pueden conservar una configuración anterior en memoria. Si no toman el nuevo broker, usar el botón de reset de configuración y completar nuevamente el portal.
+
+## Tópicos principales
+
+```text
+lscc/ambiental/temperatura
+lscc/ambiental/humedad
+lscc/ambiental/presion
+lscc/ambiental/gas
+lscc/residuos/nivel
+lscc/vigilancia/sonido
+lscc/vigilancia/imagen
+lscc/vigilancia/imagen_meta
+lscc/sistema/status
+```
+
+## Diagnóstico rápido
+
+Si Mosquitto recibe datos pero el dashboard no cambia:
+
+1. Ejecutar `netstat -ano | findstr :1883`.
+2. Comprobar que exista un solo proceso `LISTENING`.
+3. Confirmar que Flask y los ESP32 usan ese mismo broker.
+4. Buscar en Mosquitto `Sending PUBLISH to dashboard_lscc_fase1`.
+5. Suscribirse manualmente a `lscc/#` para inspeccionar el JSON.
+
+Dos brokers simultáneos pueden producir un estado engañoso: Flask aparece conectado a uno mientras los ESP32 publican en otro.
+
+Para consultar SQLite:
+
+```bat
+cd dashboard
+python ver_db.py
+python ver_db.py residuos
+python ver_db.py dispositivos
+python ver_db.py alertas
+```
+
+## Estado de los tachos
+
+El firmware de residuos está configurado actualmente con `N_SENS = 3`, mientras que el dashboard conserva cuatro tarjetas. Esto no afecta el JSON de los tres sensores activos, pero el cuarto permanecerá vacío hasta decidir entre:
+
+- instalar un cuarto HC-SR04 y ampliar pines; o
+- adaptar dashboard y esquema para mostrar solo tres tachos.
+
+Una lectura `distancia_cm = -1` significa que el HC-SR04 no recibió eco. Deben revisarse alimentación, tierra común, pines Trig/Echo, divisor de voltaje del Echo y posición física del sensor.
+
+## Documentación
+
+- `documentacion/ARQUITECTURA_Y2060.md`: correspondencia con Y.2060.
+- `documentacion/GUIA_OPERACION_LOCAL.md`: arranque, verificación y solución de problemas.
+- `documentacion/PIPELINE_MEDALLON_LOCAL.md`: capas Bronze, Silver y Gold.
+- `documentacion/ATHENA_GOLD_POWERBI.md`: Athena y conexión futura con Power BI.
+- `schemas/estado-dispositivo.schema.json`: contrato formal del heartbeat.
+
+## Pendientes principales
+
+- Resolver la cantidad definitiva de tachos.
+- Activar MQTT/TLS con certificados.
+- Crear usuarios y ACL MQTT únicos por dispositivo.
+- Separar la ingesta MQTT del proceso web.
+- Incorporar OTA firmada, auditoría y monitoreo.
+- Automatizar S3/Athena y completar los dashboards de Power BI.

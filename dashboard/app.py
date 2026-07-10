@@ -4,13 +4,13 @@ LIMA SMART CORE CITY — Dashboard Fase 1
 Flask + paho-mqtt + SQLite
 
 Cambios respecto a la versión anterior:
-  ✅ Autenticación MQTT (usuario + contraseña)
-  ✅ Persistencia en SQLite (lscc.db)
-  ✅ Historial cargado desde la DB al iniciar
-  ✅ Antirrebote de alertas (no duplica cada 5 s)
-  ✅ API /api/history para consultar histórico
-  ✅ Registro de imágenes con metadata en DB
-  ✅ Estado de dispositivos persistido
+ Autenticación MQTT (usuario + contraseña)
+  Persistencia en SQLite (lscc.db)
+  Historial cargado desde la DB al iniciar
+  Antirrebote de alertas (no duplica cada 5 s)
+   API /api/history para consultar histórico
+   Registro de imágenes con metadata en DB
+  Estado de dispositivos persistido
 ============================================================
 """
 
@@ -24,6 +24,8 @@ import os
 import threading
 import sqlite3
 import secrets
+import ssl
+import re
 from functools import wraps
 from pathlib import Path
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -41,6 +43,12 @@ MQTT_BROKER   = os.environ.get("MQTT_BROKER",   "127.0.0.1")
 MQTT_PORT     = int(os.environ.get("MQTT_PORT", "1883"))
 MQTT_USER     = os.environ.get("MQTT_USER", "")
 MQTT_PASSWORD = os.environ.get("MQTT_PASSWORD", "")
+MQTT_TLS      = os.environ.get("MQTT_TLS", "false").lower() == "true"
+MQTT_CA_CERT  = os.environ.get("MQTT_CA_CERT", "")
+MQTT_CERTFILE = os.environ.get("MQTT_CERTFILE", "")
+MQTT_KEYFILE  = os.environ.get("MQTT_KEYFILE", "")
+MQTT_KEEPALIVE = int(os.environ.get("MQTT_KEEPALIVE", "60"))
+DEVICE_OFFLINE_SECONDS = int(os.environ.get("DEVICE_OFFLINE_SECONDS", "30"))
 
 DB_PATH_CONFIG = Path(os.environ.get("LSCC_DB", "lscc.db"))
 DB_PATH = DB_PATH_CONFIG if DB_PATH_CONFIG.is_absolute() else BASE_DIR / DB_PATH_CONFIG
@@ -76,6 +84,12 @@ LOGIN_MAX_INTENTOS = int(os.environ.get("LOGIN_MAX_INTENTOS", "5"))
 LOGIN_VENTANA_SEGUNDOS = int(os.environ.get("LOGIN_VENTANA_SEGUNDOS", "900"))
 intentos_login = defaultdict(deque)
 intentos_login_lock = threading.Lock()
+REPORTES_PUBLICOS_MAX = int(os.environ.get("REPORTES_PUBLICOS_MAX", "5"))
+REPORTES_PUBLICOS_VENTANA = int(os.environ.get("REPORTES_PUBLICOS_VENTANA", "1800"))
+reportes_publicos_ip = defaultdict(deque)
+reportes_publicos_lock = threading.Lock()
+CODIGO_SEGUIMIENTO_RE = re.compile(r"^LSCC-\d{4}-[A-F0-9]{12}$")
+CORREO_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def csrf_token():
@@ -111,7 +125,7 @@ def agregar_cabeceras_seguridad(response):
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; "
-        "style-src 'self'; img-src 'self' data:; connect-src 'self'"
+        "style-src 'self'; img-src 'self' data: http:; connect-src 'self'"
     )
     return response
 
@@ -159,7 +173,7 @@ def crear_tablas_auth_si_no_existen():
         conn.execute("""
             CREATE TABLE IF NOT EXISTS reportes_ciudadanos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                usuario_id INTEGER NOT NULL,
+                usuario_id INTEGER,
                 categoria TEXT NOT NULL CHECK(categoria IN ('ambiental','residuos','vigilancia')),
                 titulo TEXT NOT NULL,
                 ubicacion TEXT NOT NULL,
@@ -170,6 +184,10 @@ def crear_tablas_auth_si_no_existen():
                 imagen TEXT,
                 creado_en TEXT NOT NULL DEFAULT (datetime('now','localtime')),
                 actualizado_en TEXT,
+                codigo_seguimiento TEXT,
+                correo_contacto TEXT,
+                origen_reporte TEXT NOT NULL DEFAULT 'cuenta',
+                permite_consulta_publica INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
             );
         """)
@@ -178,6 +196,119 @@ def crear_tablas_auth_si_no_existen():
             CREATE INDEX IF NOT EXISTS idx_reportes_estado
             ON reportes_ciudadanos(estado, creado_en DESC);
         """)
+
+    migrar_reportes_publicos_si_necesario()
+    crear_tabla_rutas_recoleccion_si_no_existe()
+
+
+def migrar_reportes_publicos_si_necesario():
+    """Migra reportes de forma transaccional e idempotente, conservando los existentes."""
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    try:
+        columnas = {r[1]: r for r in conn.execute("PRAGMA table_info(reportes_ciudadanos)")}
+        necesita_recrear = bool(columnas.get("usuario_id") and columnas["usuario_id"][3])
+        faltantes = {"codigo_seguimiento", "correo_contacto", "origen_reporte", "permite_consulta_publica"} - columnas.keys()
+        if necesita_recrear:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("ALTER TABLE reportes_ciudadanos RENAME TO reportes_ciudadanos_anterior")
+            conn.execute("""
+                CREATE TABLE reportes_ciudadanos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario_id INTEGER,
+                    categoria TEXT NOT NULL CHECK(categoria IN ('ambiental','residuos','vigilancia')),
+                    titulo TEXT NOT NULL,
+                    ubicacion TEXT NOT NULL,
+                    descripcion TEXT NOT NULL,
+                    urgencia TEXT NOT NULL DEFAULT 'media' CHECK(urgencia IN ('baja','media','alta')),
+                    estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente','en_revision','atendido','rechazado')),
+                    observacion_admin TEXT,
+                    imagen TEXT,
+                    creado_en TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    actualizado_en TEXT,
+                    codigo_seguimiento TEXT,
+                    correo_contacto TEXT,
+                    origen_reporte TEXT NOT NULL DEFAULT 'cuenta',
+                    permite_consulta_publica INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
+                )
+            """)
+            conn.execute("""
+                INSERT INTO reportes_ciudadanos
+                    (id, usuario_id, categoria, titulo, ubicacion, descripcion, urgencia,
+                     estado, observacion_admin, imagen, creado_en, actualizado_en,
+                     origen_reporte, permite_consulta_publica)
+                SELECT id, usuario_id, categoria, titulo, ubicacion, descripcion, urgencia,
+                       estado, observacion_admin, imagen, creado_en, actualizado_en,
+                       'cuenta', 0
+                FROM reportes_ciudadanos_anterior
+            """)
+            conn.execute("DROP TABLE reportes_ciudadanos_anterior")
+            conn.commit()
+        elif faltantes:
+            conn.execute("BEGIN IMMEDIATE")
+            if "codigo_seguimiento" in faltantes: conn.execute("ALTER TABLE reportes_ciudadanos ADD COLUMN codigo_seguimiento TEXT")
+            if "correo_contacto" in faltantes: conn.execute("ALTER TABLE reportes_ciudadanos ADD COLUMN correo_contacto TEXT")
+            if "origen_reporte" in faltantes: conn.execute("ALTER TABLE reportes_ciudadanos ADD COLUMN origen_reporte TEXT NOT NULL DEFAULT 'cuenta'")
+            if "permite_consulta_publica" in faltantes: conn.execute("ALTER TABLE reportes_ciudadanos ADD COLUMN permite_consulta_publica INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reportes_estado ON reportes_ciudadanos(estado, creado_en DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reportes_usuario ON reportes_ciudadanos(usuario_id, creado_en DESC)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_reportes_codigo ON reportes_ciudadanos(codigo_seguimiento) WHERE codigo_seguimiento IS NOT NULL")
+        conn.commit()
+        errores_fk = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if errores_fk:
+            raise RuntimeError(f"La migración dejó referencias inválidas: {errores_fk}")
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def crear_tabla_rutas_recoleccion_si_no_existe():
+    """Persistencia aditiva para recorridos generados manualmente."""
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS rutas_recoleccion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha_generacion TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                orden_tachos TEXT NOT NULL,
+                tachos_incluidos TEXT NOT NULL,
+                tachos_omitidos TEXT NOT NULL,
+                distancia_estimada REAL NOT NULL DEFAULT 0,
+                niveles_analizados TEXT NOT NULL,
+                ultima_lectura_residuos TEXT,
+                desactualizada INTEGER NOT NULL DEFAULT 0 CHECK(desactualizada IN (0,1))
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_rutas_recoleccion_fecha
+            ON rutas_recoleccion(fecha_generacion DESC)
+        """)
+
+
+def obtener_ultima_ruta_recoleccion():
+    with get_db() as conn:
+        row = conn.execute("""
+            SELECT * FROM rutas_recoleccion ORDER BY id DESC LIMIT 1
+        """).fetchone()
+        ultima_lectura = conn.execute(
+            "SELECT MAX(timestamp) AS ultima FROM lecturas_residuos WHERE sensor_id BETWEEN 1 AND 4"
+        ).fetchone()["ultima"]
+        if not row:
+            return None
+        ruta = dict(row)
+        desactualizada = bool(
+            ultima_lectura and ruta.get("ultima_lectura_residuos")
+            and ultima_lectura > ruta["ultima_lectura_residuos"]
+        )
+        if desactualizada and not ruta["desactualizada"]:
+            conn.execute("UPDATE rutas_recoleccion SET desactualizada = 1 WHERE id = ?", (ruta["id"],))
+        ruta["desactualizada"] = desactualizada or bool(ruta["desactualizada"])
+    for campo in ("orden_tachos", "tachos_incluidos", "tachos_omitidos", "niveles_analizados"):
+        ruta[campo] = json.loads(ruta[campo])
+    return ruta
 
 
 def login_requerido(func):
@@ -288,7 +419,7 @@ def logout():
             """, (user_id, token))
 
     session.clear()
-    return redirect(url_for("login"))
+    return redirect(url_for("index"))
 
 
 @app.route("/registro", methods=["GET", "POST"])
@@ -351,10 +482,10 @@ def get_db():
     """Abre una conexión a SQLite con row_factory para acceso por nombre."""
     # mode=rw evita crear accidentalmente una base vacía si la ruta es incorrecta.
     db_uri = DB_PATH.resolve().as_uri() + "?mode=rw"
-    conn = sqlite3.connect(db_uri, uri=True)
+    conn = sqlite3.connect(db_uri, uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA busy_timeout = 5000;")
     return conn
 
 
@@ -457,6 +588,22 @@ def db_insert_estado(device_id, modulo, status, detalle=None):
         print(f"[DB] Error estado: {e}")
 
 
+def db_dispositivo_registrado(device_id):
+    conn = None
+    try:
+        conn = get_db()
+        result = conn.execute(
+            "SELECT 1 FROM dispositivos WHERE device_id = ? AND activo = 1",
+            (device_id,)
+        ).fetchone() is not None
+        return result
+    except Exception:
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def db_cargar_historial(variable, limite=30):
     """Carga los últimos N puntos de una variable desde la DB al iniciar."""
     try:
@@ -472,6 +619,37 @@ def db_cargar_historial(variable, limite=30):
         return []
 
 
+def db_cargar_ultimo_ambiental():
+    """Carga el último valor conocido de cada variable ambiental desde la DB."""
+    resultado = {"temperatura": None, "humedad": None, "presion": None, "gas": None}
+    try:
+        with get_db() as conn:
+            for var in ["temperatura", "humedad", "presion"]:
+                row = conn.execute("""
+                    SELECT valor FROM lecturas_ambientales
+                    WHERE variable = ? AND estado = 'ok'
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (var,)).fetchone()
+                if row:
+                    resultado[var] = row["valor"]
+            row = conn.execute("""
+                SELECT valor, valor_raw, voltaje, nivel
+                FROM lecturas_ambientales
+                WHERE variable = 'gas' AND estado = 'ok'
+                ORDER BY timestamp DESC LIMIT 1
+            """).fetchone()
+            if row:
+                resultado["gas"] = {
+                    "value_raw": row["valor_raw"],
+                    "voltage":   row["voltaje"],
+                    "nivel":     row["nivel"],
+                    "estado":    "ok",
+                }
+    except Exception:
+        pass
+    return resultado
+
+
 def db_cargar_historial_residuos(sensor_id, limite=30):
     try:
         with get_db() as conn:
@@ -484,6 +662,34 @@ def db_cargar_historial_residuos(sensor_id, limite=30):
                 for r in reversed(rows)]
     except Exception:
         return []
+
+
+def db_cargar_ultimo_estado_tachos():
+    """Carga el último registro de cada tacho desde la DB para mostrar al iniciar."""
+    tachos = {str(i): nuevo_tacho(i) for i in range(1, 5)}
+    try:
+        with get_db() as conn:
+            for sid in range(1, 5):
+                row = conn.execute("""
+                    SELECT device_id, sensor_id, distancia_cm, porcentaje_llenado,
+                           nivel, timestamp
+                    FROM lecturas_residuos
+                    WHERE sensor_id = ?
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (sid,)).fetchone()
+                if row:
+                    tachos[str(sid)].update({
+                        "sensor_id":          row["sensor_id"],
+                        "distancia_cm":       row["distancia_cm"],
+                        "porcentaje_llenado": row["porcentaje_llenado"],
+                        "nivel":              row["nivel"],
+                        "estado":             "ok" if row["distancia_cm"] and row["distancia_cm"] >= 0 else "sin_datos",
+                        "ultima_actualizacion": row["timestamp"][-8:] if row["timestamp"] else None,
+                        "device_id":          row["device_id"],
+                    })
+    except Exception:
+        pass
+    return tachos
 
 
 def db_cargar_historial_sonido(limite=30):
@@ -516,13 +722,15 @@ estado = {
     "ultimo_mensaje":     None,
     "ultima_actualizacion": None,
     "device_id":          None,
-    "ambiental": {"temperatura": None, "humedad": None, "presion": None, "gas": None},
-    "residuos": {"tachos": {str(i): nuevo_tacho(i) for i in range(1, 5)}},
+    "ambiental": db_cargar_ultimo_ambiental(),
+    "residuos": {"tachos": db_cargar_ultimo_estado_tachos()},
     "vigilancia": {
         "sonido": None, "imagen_meta": None,
         "imagen_recibida": False, "imagen_timestamp": None,
+        "cam_stream_url": None,
     },
     "sistema": {"status": None},
+    "ultima_vez_modulos": {},
     "historial": {
         "temperatura":  db_cargar_historial("temperatura"),
         "humedad":      db_cargar_historial("humedad"),
@@ -614,14 +822,79 @@ def obtener_contadores_reportes(solo_usuario_id=None):
     contadores["total"] = sum(contadores.values())
     return contadores
 
+
+def normalizar_correo(correo):
+    correo = (correo or "").strip().casefold()
+    return correo if not correo or CORREO_RE.fullmatch(correo) else None
+
+
+def generar_codigo_seguimiento():
+    return f"LSCC-{datetime.now().year}-{secrets.token_hex(6).upper()}"
+
+
+def limite_reporte_publico_superado(ip):
+    ahora = time.time()
+    with reportes_publicos_lock:
+        intentos = reportes_publicos_ip[ip]
+        while intentos and ahora - intentos[0] > REPORTES_PUBLICOS_VENTANA:
+            intentos.popleft()
+        if len(intentos) >= REPORTES_PUBLICOS_MAX:
+            return True
+        intentos.append(ahora)
+    return False
+
+
+def resumen_urbano_publico():
+    with lock:
+        conexion = estado.get("conexion_mqtt")
+        ultima = estado.get("ultima_actualizacion")
+        ultima_vez = dict(estado.get("ultima_vez_modulos") or {})
+        tachos = dict((estado.get("residuos") or {}).get("tachos") or {})
+    ahora = time.time()
+    edades = [ahora - ts for ts in ultima_vez.values() if isinstance(ts, (int, float)) and ts > 0]
+    reciente = bool(edades and min(edades) <= 120)
+    if conexion == "conectado" and reciente:
+        general = "Operativo"
+    elif conexion == "conectado":
+        general = "Datos en actualización"
+    else:
+        general = "Sin conexión reciente"
+    ambiental_reciente = any(
+        ahora - ultima_vez.get(dispositivo, 0) <= 120
+        for dispositivo in ("ESP32_AIRE_01",) if ultima_vez.get(dispositivo)
+    )
+    requieren_atencion = sum(
+        1 for t in tachos.values()
+        if isinstance(t, dict) and (t.get("porcentaje_llenado") or 0) >= 80
+    )
+    ultima_ruta = obtener_ultima_ruta_recoleccion()
+    if requieren_atencion == 0:
+        estado_recojo = "No se requiere recojo por el momento"
+    elif ultima_ruta and ultima_ruta.get("tachos_incluidos"):
+        estado_recojo = "Ruta de recojo disponible"
+    else:
+        estado_recojo = "Atención de recojo pendiente"
+    return {
+        "general": general,
+        "ambiente": "Lecturas ambientales disponibles" if ambiental_reciente else "Sin datos recientes",
+        "contenedores": 4,
+        "requieren_atencion": min(requieren_atencion, 4),
+        "estado_recojo": estado_recojo,
+        "ultima_ruta_recojo": ultima_ruta["fecha_generacion"] if ultima_ruta else "Sin planificación reciente",
+        "reportes": obtener_contadores_reportes(),
+        "ultima_actualizacion": ultima or "Sin actualización reciente",
+    }
+
 # ============================================================
 # CALLBACKS MQTT
 # ============================================================
 def on_connect(client, userdata, flags, rc):
+    print(f"[DEBUG on_connect] rc={rc}", flush=True)
     with lock:
         estado["conexion_mqtt"] = "conectado" if rc == 0 else f"error rc={rc}"
     if rc == 0:
-        client.subscribe("lscc/#")
+        result = client.subscribe("lscc/#")
+        print(f"[DEBUG on_connect] subscribe result={result}", flush=True)
         agregar_log("Dashboard conectado y suscrito a lscc/#")
     else:
         agregar_log(f"Error al conectar al broker. Código: {rc}")
@@ -675,17 +948,30 @@ def on_message(client, userdata, msg):
 
         return
 
+    print(f"[DEBUG MQTT] topic={topic}", flush=True)
+
     data = parse_json(msg.payload)
     if data is None:
+        print(f"[DEBUG MQTT] payload no es JSON", flush=True)
         agregar_log(f"Payload no-JSON en {topic}")
         return
 
     device_id = data.get("device_id", "desconocido")
+    registrado = db_dispositivo_registrado(device_id)
+    print(f"[DEBUG MQTT] device_id={device_id} registrado={registrado}", flush=True)
+    if not registrado:
+        agregar_log(f"Dispositivo no registrado rechazado: {device_id}")
+        return
 
     with lock:
         estado["ultimo_mensaje"] = topic
         estado["ultima_actualizacion"] = time.strftime("%H:%M:%S")
         estado["device_id"] = device_id
+        # Will offline = timestamp 0 → nodo aparece offline inmediatamente en el dashboard
+        if topic == "lscc/sistema/status" and data.get("status") == "offline":
+            estado["ultima_vez_modulos"][device_id] = 0
+        else:
+            estado["ultima_vez_modulos"][device_id] = time.time()
 
         if topic == "lscc/ambiental/temperatura":
             valor = data.get("value")
@@ -804,10 +1090,18 @@ def on_message(client, userdata, msg):
         elif topic == "lscc/sistema/status":
             estado["sistema"]["status"] = data
 
+            # Capturar stream URL cuando la cámara publica su IP
+            if device_id == "ESP32_CAM_01" and data.get("stream_url"):
+                estado["vigilancia"]["cam_stream_url"] = data["stream_url"]
+
+            status_dispositivo = data.get("status", "error")
+            if status_dispositivo not in ("online", "offline", "sin_datos", "error"):
+                status_dispositivo = "error"
+
             db_insert_estado(
                 device_id,
                 data.get("modulo"),
-                "online",
+                status_dispositivo,
                 json.dumps(data)
             )
 
@@ -817,18 +1111,47 @@ def on_message(client, userdata, msg):
 # HILO MQTT
 # ============================================================
 def iniciar_mqtt():
-    client = mqtt.Client(client_id="dashboard_lscc_fase1")
-    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)   # Fase 1: auth
+    try:
+        client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
+            client_id="dashboard_lscc_fase1"
+        )
+    except AttributeError:
+        client = mqtt.Client(client_id="dashboard_lscc_fase1")
+    if MQTT_USER:
+        client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+    if MQTT_TLS:
+        ca_cert = Path(MQTT_CA_CERT)
+        if not ca_cert.is_absolute():
+            ca_cert = BASE_DIR / ca_cert
+        certfile = Path(MQTT_CERTFILE) if MQTT_CERTFILE else None
+        keyfile = Path(MQTT_KEYFILE) if MQTT_KEYFILE else None
+        if certfile and not certfile.is_absolute():
+            certfile = BASE_DIR / certfile
+        if keyfile and not keyfile.is_absolute():
+            keyfile = BASE_DIR / keyfile
+        if not ca_cert.is_file():
+            raise RuntimeError(f"No se encontró el certificado CA MQTT: {ca_cert}")
+        client.tls_set(
+            ca_certs=str(ca_cert),
+            certfile=str(certfile) if certfile else None,
+            keyfile=str(keyfile) if keyfile else None,
+            tls_version=ssl.PROTOCOL_TLS_CLIENT,
+        )
     client.on_connect    = on_connect
     client.on_disconnect = on_disconnect
     client.on_message    = on_message
 
     while True:
         try:
+            print(f"[DEBUG MQTT] Intentando connect a {MQTT_BROKER}:{MQTT_PORT}", flush=True)
             agregar_log(f"Conectando a broker {MQTT_BROKER}:{MQTT_PORT}")
-            client.connect(MQTT_BROKER, MQTT_PORT, 60)
+            client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
+            print(f"[DEBUG MQTT] connect() retornó OK, entrando a loop_forever", flush=True)
             client.loop_forever()
+            print(f"[DEBUG MQTT] loop_forever() salió SIN excepción", flush=True)
         except Exception as e:
+            print(f"[DEBUG MQTT] EXCEPCIÓN: {e}", flush=True)
             with lock:
                 estado["conexion_mqtt"] = "desconectado"
             agregar_log(f"Error MQTT: {e}. Reintentando en 5 s...")
@@ -839,17 +1162,178 @@ def iniciar_mqtt():
 # RUTAS FLASK
 # ============================================================
 @app.route("/")
-@login_requerido
 def index():
+    if not session.get("user_id") or not session.get("session_token"):
+        return render_template("inicio_publico.html")
+    return index_autenticado()
+
+
+@login_requerido
+def index_autenticado():
     contadores = obtener_contadores_reportes(
         None if session.get("rol") in ("admin", "trabajador") else session.get("user_id")
     )
+    template = "index.html" if session.get("rol") == "usuario" else "dashboard_principal.html"
     return render_template(
-        "index.html",
+        template,
         username=session.get("username"),
         rol=session.get("rol"),
         contadores=contadores
     )
+
+
+@app.route("/estado-urbano")
+def estado_urbano():
+    return render_template("estado_urbano.html", resumen=resumen_urbano_publico())
+
+
+def render_dashboard_tecnico(template):
+    """Construye el contexto visual común sin duplicar lógica de datos IoT."""
+    return render_template(
+        template,
+        username=session.get("username"),
+        rol=session.get("rol")
+    )
+
+
+@app.route("/vigilancia")
+@login_requerido
+@trabajador_o_admin_requerido
+def vigilancia():
+    return render_dashboard_tecnico("vigilancia.html")
+
+
+@app.route("/ambiente")
+@login_requerido
+@trabajador_o_admin_requerido
+def ambiente():
+    return render_dashboard_tecnico("ambiente.html")
+
+
+@app.route("/residuos")
+@login_requerido
+@trabajador_o_admin_requerido
+def residuos():
+    return render_dashboard_tecnico("residuos.html")
+
+
+@app.route("/ruta-recoleccion")
+@login_requerido
+@trabajador_o_admin_requerido
+def ruta_recoleccion():
+    return render_dashboard_tecnico("ruta_recoleccion.html")
+
+
+@app.route("/api/ruta-recoleccion-datos")
+@login_requerido
+@trabajador_o_admin_requerido
+def api_ruta_recoleccion_datos():
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT r.sensor_id, r.porcentaje_llenado, r.nivel, r.timestamp
+            FROM lecturas_residuos r
+            INNER JOIN (
+                SELECT sensor_id, MAX(timestamp) AS ultimo
+                FROM lecturas_residuos
+                WHERE sensor_id BETWEEN 1 AND 4
+                GROUP BY sensor_id
+            ) ult ON ult.sensor_id = r.sensor_id AND ult.ultimo = r.timestamp
+            ORDER BY r.sensor_id
+        """).fetchall()
+    lecturas = {row["sensor_id"]: dict(row) for row in rows}
+    ahora = datetime.now()
+    tachos = []
+    for sensor_id, etiqueta in enumerate(("A", "B", "C", "D"), start=1):
+        lectura = lecturas.get(sensor_id)
+        reciente = False
+        if lectura and lectura.get("timestamp"):
+            try:
+                reciente = (ahora - datetime.strptime(lectura["timestamp"], "%Y-%m-%d %H:%M:%S")).total_seconds() <= 120
+            except ValueError:
+                reciente = False
+        tachos.append({
+            "id": etiqueta,
+            "sensor_id": sensor_id,
+            "porcentaje": lectura.get("porcentaje_llenado") if lectura else None,
+            "nivel": lectura.get("nivel") if lectura else None,
+            "ultima_actualizacion": lectura.get("timestamp") if lectura else None,
+            "reciente": reciente,
+        })
+    return jsonify({"tachos": tachos, "actualizado_en": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+
+
+@app.route("/api/ruta-recoleccion-ultima")
+@login_requerido
+@trabajador_o_admin_requerido
+def api_ruta_recoleccion_ultima():
+    return jsonify({"ruta": obtener_ultima_ruta_recoleccion()})
+
+
+@app.route("/api/ruta-recoleccion-guardar", methods=["POST"])
+@login_requerido
+@trabajador_o_admin_requerido
+def api_ruta_recoleccion_guardar():
+    datos = request.get_json(silent=True) or {}
+    permitidos = {"A", "B", "C", "D"}
+    orden = datos.get("orden") or []
+    incluidos = datos.get("incluidos") or []
+    omitidos = datos.get("omitidos") or []
+    niveles = datos.get("niveles") or []
+    try:
+        distancia = float(datos.get("distancia", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "datos_invalidos"}), 400
+    if not (0 <= distancia <= 10000):
+        return jsonify({"error": "datos_invalidos"}), 400
+    if not all(isinstance(x, str) and x in permitidos for x in orden + incluidos + omitidos):
+        return jsonify({"error": "datos_invalidos"}), 400
+    if len(set(orden)) != len(orden) or set(orden) != set(incluidos):
+        return jsonify({"error": "datos_invalidos"}), 400
+    if set(incluidos) & set(omitidos) or set(incluidos) | set(omitidos) != permitidos:
+        return jsonify({"error": "datos_invalidos"}), 400
+    niveles_limpios = []
+    for item in niveles:
+        if not isinstance(item, dict) or item.get("id") not in permitidos:
+            return jsonify({"error": "datos_invalidos"}), 400
+        porcentaje = item.get("porcentaje")
+        if porcentaje is not None:
+            try:
+                porcentaje = max(0, min(100, float(porcentaje)))
+            except (TypeError, ValueError):
+                return jsonify({"error": "datos_invalidos"}), 400
+        niveles_limpios.append({
+            "id": item["id"], "porcentaje": porcentaje,
+            "reciente": bool(item.get("reciente")),
+            "ultima_actualizacion": item.get("ultima_actualizacion")
+        })
+    if len(niveles_limpios) != 4 or {x["id"] for x in niveles_limpios} != permitidos:
+        return jsonify({"error": "datos_invalidos"}), 400
+    ultima_lectura = max((x["ultima_actualizacion"] for x in niveles_limpios if x["ultima_actualizacion"]), default=None)
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO rutas_recoleccion
+                (orden_tachos, tachos_incluidos, tachos_omitidos, distancia_estimada,
+                 niveles_analizados, ultima_lectura_residuos, desactualizada)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+        """, (
+            json.dumps(orden), json.dumps(incluidos), json.dumps(omitidos), distancia,
+            json.dumps(niveles_limpios), ultima_lectura
+        ))
+    return jsonify({"ok": True, "ruta": obtener_ultima_ruta_recoleccion()})
+
+
+@app.route("/sonido")
+@login_requerido
+@trabajador_o_admin_requerido
+def sonido():
+    return render_dashboard_tecnico("sonido.html")
+
+
+@app.route("/registro-tecnico")
+@login_requerido
+@trabajador_o_admin_requerido
+def registro_tecnico():
+    return render_dashboard_tecnico("registro_tecnico.html")
 
 
 @app.route("/usuarios", methods=["GET", "POST"])
@@ -910,11 +1394,22 @@ def usuarios():
 
 
 @app.route("/nuevo-reporte", methods=["GET", "POST"])
-@login_requerido
-@usuario_requerido
 def nuevo_reporte():
     mensaje = None
     error = None
+    autenticado = bool(session.get("user_id") and session.get("session_token"))
+    if autenticado:
+        with get_db() as conn:
+            usuario_actual = conn.execute(
+                "SELECT rol, active_session_token FROM usuarios WHERE id = ?",
+                (session.get("user_id"),)
+            ).fetchone()
+        if not usuario_actual or usuario_actual["active_session_token"] != session.get("session_token"):
+            session.clear()
+            return redirect(url_for("login", mensaje="sesion_reemplazada"))
+        session["rol"] = usuario_actual["rol"]
+    if autenticado and session.get("rol") != "usuario":
+        return redirect(url_for("reportes"))
 
     if request.method == "POST":
         categoria = request.form.get("categoria", "").strip()
@@ -922,6 +1417,7 @@ def nuevo_reporte():
         ubicacion = request.form.get("ubicacion", "").strip()
         descripcion = request.form.get("descripcion", "").strip()
         urgencia = request.form.get("urgencia", "media").strip()
+        correo = normalizar_correo(request.form.get("correo_contacto"))
 
         if categoria not in ("ambiental", "residuos", "vigilancia"):
             error = "Selecciona una categoría válida."
@@ -929,6 +1425,10 @@ def nuevo_reporte():
             error = "Selecciona una urgencia válida."
         elif not titulo or not ubicacion or not descripcion:
             error = "Completa título, ubicación y descripción."
+        elif correo is None:
+            error = "Ingresa un correo de contacto válido o deja el campo vacío."
+        elif not autenticado and limite_reporte_publico_superado(request.remote_addr or "desconocida"):
+            error = "Se alcanzó el límite temporal de reportes. Inténtalo nuevamente más tarde."
         else:
             nombre_guardado = None
             archivo = request.files.get("imagen")
@@ -941,24 +1441,57 @@ def nuevo_reporte():
                     archivo.save(REPORTES_DIR / nombre_guardado)
 
             if not error:
+                codigo = generar_codigo_seguimiento() if not autenticado else None
                 with get_db() as conn:
                     conn.execute("""
                         INSERT INTO reportes_ciudadanos
-                          (usuario_id, categoria, titulo, ubicacion, descripcion, urgencia, imagen)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                          (usuario_id, categoria, titulo, ubicacion, descripcion, urgencia, imagen,
+                           codigo_seguimiento, correo_contacto, origen_reporte, permite_consulta_publica)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        session.get("user_id"), categoria, titulo, ubicacion,
-                        descripcion, urgencia, nombre_guardado
+                        session.get("user_id") if autenticado else None,
+                        categoria, titulo, ubicacion, descripcion, urgencia, nombre_guardado,
+                        codigo, correo, "cuenta" if autenticado else "publico", 0 if autenticado else 1
                     ))
+                if not autenticado:
+                    return render_template("reporte_confirmado.html", codigo=codigo)
                 mensaje = "Reporte registrado correctamente. El administrador podrá revisarlo."
 
     return render_template(
-        "nuevo_reporte.html",
+        "nuevo_reporte.html" if autenticado else "nuevo_reporte_publico.html",
         mensaje=mensaje,
         error=error,
         username=session.get("username"),
-        rol=session.get("rol")
+        rol=session.get("rol"),
+        correo_contacto=request.form.get("correo_contacto", "")
     )
+
+
+@app.route("/consulta-reporte", methods=["GET", "POST"])
+def consulta_reporte():
+    reporte = None
+    error = None
+    codigo = request.values.get("codigo", "").strip().upper()
+    if request.method == "POST":
+        correo = normalizar_correo(request.form.get("correo_contacto"))
+        if not CODIGO_SEGUIMIENTO_RE.fullmatch(codigo) or correo is None:
+            error = "No se encontró un reporte con los datos proporcionados."
+        else:
+            with get_db() as conn:
+                row = conn.execute("""
+                    SELECT codigo_seguimiento, categoria, estado, creado_en, actualizado_en
+                    FROM reportes_ciudadanos
+                    WHERE codigo_seguimiento = ? AND origen_reporte = 'publico'
+                      AND permite_consulta_publica = 1
+                      AND (correo_contacto IS NULL OR correo_contacto = '' OR correo_contacto = ?)
+                """, (codigo, correo or "")).fetchone()
+            if row:
+                reporte = dict(row)
+                estados = {"pendiente": "Recibido", "en_revision": "En revisión", "atendido": "Atendido", "rechazado": "No procede"}
+                reporte["estado_publico"] = estados.get(reporte["estado"], "Recibido")
+            else:
+                error = "No se encontró un reporte con los datos proporcionados."
+    return render_template("consulta_reporte.html", reporte=reporte, error=error, codigo=codigo)
 
 
 @app.route("/reportes")
@@ -985,9 +1518,9 @@ def reportes():
 
     with get_db() as conn:
         rows = conn.execute(f"""
-            SELECT r.*, u.username
+            SELECT r.*, COALESCE(u.username, 'Visitante') AS username
             FROM reportes_ciudadanos r
-            JOIN usuarios u ON u.id = r.usuario_id
+            LEFT JOIN usuarios u ON u.id = r.usuario_id
             {where}
             ORDER BY
                 CASE r.estado
@@ -1131,7 +1664,27 @@ def api_dispositivos():
                   )
                 ORDER BY d.modulo, d.device_id
             """).fetchall()
-        return jsonify([dict(r) for r in rows])
+        ahora = datetime.now()
+        dispositivos = []
+        for row in rows:
+            item = dict(row)
+            timestamp = item.get("ultimo_heartbeat") or item.get("ultima_vez")
+            segundos_sin_datos = None
+            if timestamp:
+                try:
+                    segundos_sin_datos = max(
+                        0, int((ahora - datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")).total_seconds())
+                    )
+                except ValueError:
+                    pass
+            item["segundos_sin_datos"] = segundos_sin_datos
+            item["estado_calculado"] = (
+                "offline"
+                if segundos_sin_datos is None or segundos_sin_datos > DEVICE_OFFLINE_SECONDS
+                else item.get("status", "online")
+            )
+            dispositivos.append(item)
+        return jsonify(dispositivos)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1148,7 +1701,7 @@ if __name__ == "__main__":
 
     crear_tablas_auth_si_no_existen()
     print(f"[DB] Usando base de datos: {DB_PATH}")
-    print(f"[MQTT] Broker: {MQTT_BROKER}:{MQTT_PORT} | User: {MQTT_USER}")
+    print(f"[MQTT] Broker: {MQTT_BROKER}:{MQTT_PORT} | TLS: {MQTT_TLS} | User: {MQTT_USER}")
 
     hilo = threading.Thread(target=iniciar_mqtt, daemon=True)
     hilo.start()

@@ -1,0 +1,15 @@
+{% set requires_iot_js = false %}{% set requires_charts = false %}{% extends "base_dashboard.html" %}
+{% block title %}Ruta de recolección{% endblock %}{% block subheading %}Planificación operativa{% endblock %}
+{% block content %}
+<header class="page-heading"><div><span class="section-label">Residuos inteligentes</span><h1>Ruta de recolección inteligente</h1><p>Analiza el nivel de los contenedores y propone un recorrido para atender solo los necesarios.</p></div><button id="generarRecorrido" class="route-generate" type="button">Generar recorrido</button></header>
+<div id="lecturasNuevas" class="new-readings-notice" hidden>Hay lecturas nuevas. Genera nuevamente el recorrido para actualizarlo.</div>
+<section class="collection-bin-grid" aria-label="Estado de los contenedores">
+  {% for etiqueta in ['A','B','C','D'] %}<article id="rutaTacho{{ etiqueta }}" class="collection-bin-card no-data"><div class="tc-top"><span class="tc-label">Tacho {{ etiqueta }}</span><span id="rutaEstado{{ etiqueta }}" class="mini-pill">Sin datos</span></div><strong id="rutaPorcentaje{{ etiqueta }}" class="route-bin-value">--</strong><p id="rutaDecision{{ etiqueta }}">Sin datos recientes</p><small id="rutaActualizacion{{ etiqueta }}">Última actualización: --</small></article>{% endfor %}
+</section>
+<section class="collection-workspace">
+  <article class="model-map-card"><div class="panel-head"><div><span class="section-label">Mapa de la maqueta</span><h2>Maqueta urbana</h2></div></div><div id="mapaMaqueta" class="model-map"><div class="road road-horizontal"></div><div class="road road-vertical"></div><svg id="rutaSvg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Recorrido generado"><polyline id="rutaLinea" points="" vector-effect="non-scaling-stroke"></polyline></svg><div id="marcadoresMapa"></div></div></article>
+  <aside class="route-result panel"><span class="section-label">Resultado</span><h2>Recorrido sugerido</h2><div id="rutaVacia" class="route-empty">Presiona “Generar recorrido” para calcular una ruta.</div><div id="rutaContenido" hidden><p id="rutaTexto" class="route-sequence"></p><p><b>Distancia estimada:</b> <span id="rutaDistancia"></span> unidades de recorrido</p><div class="route-list"><h3>Tachos programados</h3><ul id="tachosProgramados"></ul></div><div class="route-list"><h3>Tachos omitidos</h3><ul id="tachosOmitidos"></ul></div><small id="rutaGeneradaEn"></small></div></aside>
+</section>
+<section class="route-legend" aria-label="Leyenda"><span><i class="legend-dot green"></i>No requiere recojo</span><span><i class="legend-dot orange"></i>Recojo recomendado</span><span><i class="legend-dot red"></i>Recojo urgente</span><span><i class="legend-line"></i>Ruta generada</span><span><i class="legend-dot blue"></i>Tacho en ruta</span><span><i class="legend-dot leaf"></i>Ambiente</span><span><i class="legend-dot cam"></i>Videovigilancia</span></section>
+{% endblock %}
+{% block scripts %}<script src="/static/mapa_maqueta.js"></script><script src="/static/ruta_recoleccion.js"></script>{% endblock %}

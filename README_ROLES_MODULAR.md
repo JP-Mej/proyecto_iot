@@ -17,7 +17,7 @@
 ## Credencial inicial
 
 - Usuario: `admin`
-- Contraseña: `admin123`
+- Contraseña: valor privado `ADMIN_INITIAL_PASSWORD` de `dashboard/.env`.
 
 ## Instalación
 

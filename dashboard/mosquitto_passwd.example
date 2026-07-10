@@ -1,0 +1,5 @@
+# No utilizar este archivo directamente.
+# Genera dashboard/mosquitto_passwd.txt con:
+#   mosquitto_passwd -c mosquitto_passwd.txt <usuario>
+#
+# El archivo real está ignorado por Git.

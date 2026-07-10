@@ -23,22 +23,26 @@
 */
 
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include "secrets.h"
 
 // ============================================================
 // CONFIGURACIÓN
 // ============================================================
-const char* WIFI_SSID     = "PISO4_PLUS";
-const char* WIFI_PASS     = "12345678*2020";
+const char* WIFI_SSID     = LSCC_WIFI_SSID;
+const char* WIFI_PASS     = LSCC_WIFI_PASSWORD;
 
-const char* MQTT_BROKER   = "192.168.100.99";
+const char* MQTT_BROKER   = LSCC_MQTT_BROKER;
 const int   MQTT_PORT     = 1883;
-const char* MQTT_USER     = "lscc_user";
-const char* MQTT_PASSWORD = "lscc2025";
+const char* MQTT_USER     = LSCC_MQTT_USER;
+const char* MQTT_PASSWORD = LSCC_MQTT_PASSWORD;
 
 // FASE 1 — CORRECCIÓN CRÍTICA: Device ID fijo, nunca aleatorio
 const char* DEVICE_ID     = "ESP32_KY037_01";
+const char* FIRMWARE_VERSION = "1.1.0";
+const char* SCHEMA_VERSION = "1.0";
 
 // Tópicos
 const char* TOPIC_SONIDO  = "lscc/vigilancia/sonido";
@@ -80,17 +84,31 @@ void conectarMQTT() {
     Serial.print("[MQTT] Conectando con auth... ");
 
     // FASE 1: ID fijo — nunca usar random()
-    if (client.connect(DEVICE_ID, MQTT_USER, MQTT_PASSWORD)) {
+    StaticJsonDocument<160> willDoc;
+    willDoc["device_id"] = DEVICE_ID;
+    willDoc["modulo"] = "vigilancia";
+    willDoc["status"] = "offline";
+    willDoc["schema_version"] = SCHEMA_VERSION;
+    char willPayload[160];
+    serializeJson(willDoc, willPayload);
+
+    if (client.connect(DEVICE_ID, MQTT_USER, MQTT_PASSWORD,
+                       TOPIC_STATUS, 1, true, willPayload)) {
       Serial.println("OK");
 
-      StaticJsonDocument<192> doc;
+      StaticJsonDocument<384> doc;
       doc["device_id"] = DEVICE_ID;
       doc["status"]    = "online";
       doc["modulo"]    = "vigilancia";
       doc["sensor"]    = "KY-037";
       doc["modo"]      = "analogico";
       doc["pin"]       = "GPIO34";
-      char buf[192];
+      doc["schema_version"] = SCHEMA_VERSION;
+      doc["firmware_version"] = FIRMWARE_VERSION;
+      doc["uptime_ms"] = millis();
+      doc["rssi_dbm"] = WiFi.RSSI();
+      doc["ip"] = WiFi.localIP().toString();
+      char buf[384];
       serializeJson(doc, buf);
       client.publish(TOPIC_STATUS, buf, true);
       Serial.println("[MQTT] Status enviado");
@@ -129,6 +147,7 @@ void setup() {
   Serial.println("[KY-037] ADC configurado en GPIO34");
 
   conectarWiFi();
+  MDNS.begin("lscc-ky037");
   client.setServer(MQTT_BROKER, MQTT_PORT);
 }
 
@@ -172,6 +191,8 @@ void loop() {
   doc["porcentaje"] = porcentaje;
   doc["nivel"]      = nivel;
   doc["unit"]       = "raw_adc";
+  doc["schema_version"] = SCHEMA_VERSION;
+  doc["uptime_ms"] = millis();
 
   char buf[256];
   serializeJson(doc, buf);
