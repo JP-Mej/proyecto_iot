@@ -1,10 +1,51 @@
 {% set active_page = 'vigilancia' %}{% set requires_charts = false %}{% extends "base_dashboard.html" %}
-{% block title %}Vigilancia{% endblock %}{% block heading %}Área de Vigilancia{% endblock %}{% block subheading %}Supervisión visual mediante ESP32-CAM{% endblock %}
+{% block title %}Vigilancia{% endblock %}{% block heading %}Área de Vigilancia{% endblock %}{% block subheading %}Supervisión visual mediante ESP32-CAM y cámara USB{% endblock %}
 {% block content %}
-<header class="page-heading"><div><span class="mod-tag tag-vigilancia">Vigilancia</span><h1>Cámara ESP32-CAM</h1><p>Transmisión y estado actual del dispositivo.</p></div><span id="camLivePill" class="pill">Sin señal</span></header>
+<header class="page-heading"><div><span class="mod-tag tag-vigilancia">Vigilancia</span><h1>Videovigilancia</h1><p>Transmisión y estado actual de las cámaras disponibles.</p></div></header>
 <section id="sec-camara" class="module mod-vigilancia module-page">
-  <div class="camera-box"><img id="cameraImage" src="http://10.101.53.9/stream" alt="Stream ESP32-CAM"></div>
-  <p class="camera-meta"><span id="imgMeta">Conectando al stream...</span></p>
-  <div class="module-note"><strong>Eventos de vigilancia</strong><p>Los eventos y metadatos existentes se reflejan mediante el estado actual de la cámara.</p></div>
+  <div class="surveillance-grid">
+    <article class="surveillance-card">
+      <div class="surveillance-head"><div><h2>Cámara ESP32-CAM</h2><p>Transmisión remota del módulo IoT.</p></div><span id="camLivePill" class="pill">Sin señal</span></div>
+      <div class="camera-box"><img id="cameraImage" src="http://192.168.1.20:81/stream" alt="Stream ESP32-CAM"></div>
+      <p class="camera-meta"><span id="imgMeta">Conectando al stream...</span></p>
+    </article>
+    <article class="surveillance-card">
+      <div class="surveillance-head"><div><h2>Cámara USB</h2><p>Conectada directamente a la laptop.</p></div><span id="usbCameraStatus" class="pill">Comprobando...</span></div>
+      <div class="camera-box usb-camera-box">
+        <span class="camera-placeholder">Cámara USB física no disponible</span>
+        <img id="usbCameraImage" src="{{ url_for('video_usb') }}" alt="Stream Cámara USB">
+      </div>
+      <p class="camera-meta">Dispositivo local · 640 × 480 · ~20 FPS</p>
+    </article>
+  </div>
+  <section class="smart-surveillance" aria-labelledby="smartSurveillanceTitle">
+    <input id="surveillanceCsrfToken" type="hidden" value="{{ csrf_token() }}">
+    <div class="smart-status-card">
+      <div><span class="section-label">Análisis inteligente</span><h2 id="smartSurveillanceTitle">Detección de personas</h2></div>
+      <div class="status-box"><span id="personDetectionStatus" class="pill">Persona: Sin persona</span><span id="faceOrientationStatus" class="pill">Orientación: No determinada</span><span id="faceVisibilityStatus" class="pill">Visibilidad: No concluyente</span><span id="surveillanceAlertLevel" class="pill">Nivel: normal</span><span id="smartAnalysisStatus" class="pill">Iniciando análisis</span></div>
+    </div>
+    <div id="surveillanceSummaryCards" class="surveillance-summary-grid" aria-label="Resumen de eventos"></div>
+    <div id="latestSurveillanceAlert" class="latest-alert empty">
+      <div><span class="section-label">Última alerta importante</span><h3 id="latestAlertType">Sin alertas importantes recientes</h3><p id="latestAlertTime">Se priorizan eventos de revisión y nivel alto.</p></div>
+      <img id="latestAlertImage" alt="Captura de la última alerta" hidden>
+    </div>
+    <div class="surveillance-history">
+      <div class="history-heading"><div><span class="section-label">Historial reciente</span><h2>Últimos eventos</h2></div><small>Se muestran hasta 10 resultados por filtro.</small></div>
+      <div class="surveillance-filters" aria-label="Filtros de eventos">
+        <div class="filter-pills"><button class="event-filter active" type="button" data-level="todos">Todos</button><button class="event-filter" type="button" data-level="alto">Alto</button><button class="event-filter" type="button" data-level="revision">Revisión</button><button class="event-filter" type="button" data-level="informativo">Informativo</button></div>
+        <label for="eventTypeFilter">Tipo de evento<select id="eventTypeFilter"><option value="todos">Todos los tipos</option></select></label>
+      </div>
+      <div class="table-wrap">
+        <table class="users-table surveillance-events-table">
+          <thead><tr><th>Hora</th><th>Evento</th><th>Cámara</th><th>Nivel</th><th>Estado</th><th>Captura</th><th>Acción</th></tr></thead>
+          <tbody id="surveillanceEventsBody"><tr><td colspan="7" class="muted">Sin eventos recientes</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 </section>
+<dialog id="surveillanceCaptureModal" class="capture-modal" aria-labelledby="captureModalTitle">
+  <div class="capture-modal-head"><div><span class="section-label">Captura de evento</span><h2 id="captureModalTitle">Vista de captura</h2><p id="captureModalMeta" class="muted"></p></div><button id="closeCaptureModal" class="capture-modal-close" type="button" aria-label="Cerrar visor">×</button></div>
+  <div class="capture-modal-body"><img id="captureModalImage" alt="Captura ampliada del evento"></div>
+</dialog>
 {% endblock %}

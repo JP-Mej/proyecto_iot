@@ -14,7 +14,7 @@ Cambios respecto a la versión anterior:
 ============================================================
 """
 
-from flask import Flask, render_template, jsonify, send_file, request, redirect, url_for, session
+from flask import Flask, Response, render_template, jsonify, send_file, request, redirect, url_for, session
 from datetime import datetime
 from collections import defaultdict, deque
 import paho.mqtt.client as mqtt
@@ -26,6 +26,9 @@ import sqlite3
 import secrets
 import ssl
 import re
+os.environ["OPENCV_VIDEOIO_PRIORITY_OBSENSOR"] = "0"
+import cv2
+from pygrabber.dshow_graph import FilterGraph
 from functools import wraps
 from pathlib import Path
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -49,6 +52,29 @@ MQTT_CERTFILE = os.environ.get("MQTT_CERTFILE", "")
 MQTT_KEYFILE  = os.environ.get("MQTT_KEYFILE", "")
 MQTT_KEEPALIVE = int(os.environ.get("MQTT_KEEPALIVE", "60"))
 DEVICE_OFFLINE_SECONDS = int(os.environ.get("DEVICE_OFFLINE_SECONDS", "30"))
+USB_CAMERA_INDEX = 0
+OBS_CAMERA_INDEX = 1
+YOLO_MODEL_NAME = "yolov8n.pt"
+YOLO_MODEL_PATH = BASE_DIR / YOLO_MODEL_NAME
+PERSONA_CONFIANZA_MINIMA = 0.45
+ANALISIS_CADA_N_FRAMES = 5
+PERSONA_FRAMES_CONSECUTIVOS = 3
+EVENTO_VIGILANCIA_COOLDOWN = 20
+PERMANENCIA_PROLONGADA_SEGUNDOS = 25
+TRANSITO_REPETITIVO_APARICIONES = 3
+TRANSITO_REPETITIVO_VENTANA_SEGUNDOS = 120
+PERSONA_FRAMES_AUSENTES = 2
+DETECCION_ROSTRO_ACTIVA = True
+DETECCION_POSE_ACTIVA = True
+POSE_MODEL_NAME = "yolov8n-pose.pt"
+POSE_MODEL_PATH = BASE_DIR / POSE_MODEL_NAME
+ROSTRO_REGION_SUPERIOR = 0.40
+ROSTRO_NO_VISIBLE_FRAMES = 8
+ROSTRO_NO_VISIBLE_COOLDOWN = 30
+CONFIANZA_POSE_MINIMA = 0.35
+CONFIANZA_ROSTRO_MINIMA = 0.40
+PERFIL_FRAMES_CONSECUTIVOS = 8
+ESPALDA_FRAMES_CONSECUTIVOS = 10
 
 DB_PATH_CONFIG = Path(os.environ.get("LSCC_DB", "lscc.db"))
 DB_PATH = DB_PATH_CONFIG if DB_PATH_CONFIG.is_absolute() else BASE_DIR / DB_PATH_CONFIG
@@ -59,6 +85,8 @@ LAST_IMAGE    = IMG_DIR / "ultima_imagen.jpg"
 
 REPORTES_DIR = BASE_DIR / "reportes_adjuntos"
 REPORTES_DIR.mkdir(exist_ok=True)
+CAPTURAS_VIGILANCIA_DIR = BASE_DIR / "static" / "capturas_vigilancia"
+CAPTURAS_VIGILANCIA_DIR.mkdir(parents=True, exist_ok=True)
 EXTENSIONES_PERMITIDAS = {"png", "jpg", "jpeg", "webp"}
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(5 * 1024 * 1024)))
 
@@ -88,6 +116,42 @@ REPORTES_PUBLICOS_MAX = int(os.environ.get("REPORTES_PUBLICOS_MAX", "5"))
 REPORTES_PUBLICOS_VENTANA = int(os.environ.get("REPORTES_PUBLICOS_VENTANA", "1800"))
 reportes_publicos_ip = defaultdict(deque)
 reportes_publicos_lock = threading.Lock()
+analisis_vigilancia_lock = threading.Lock()
+modelo_yolo = None
+modelo_yolo_error = None
+modelo_pose = None
+modelo_pose_error = None
+persona_frames_actuales = 0
+persona_frames_ausentes = 0
+presencia_confirmada = False
+inicio_presencia = None
+evento_persona_emitido = False
+evento_permanencia_emitido = False
+apariciones_persona = deque()
+ultimo_evento_por_tipo = defaultdict(float)
+detectores_rostro = None
+detectores_rostro_error = None
+rostro_no_visible_frames = 0
+perfil_frames_actuales = 0
+espalda_frames_actuales = 0
+evento_perfil_emitido = False
+rostro_no_visible_activo = False
+permanencia_activa = False
+transito_repetitivo_hasta = 0.0
+evento_rostro_permanencia_emitido = False
+evento_rostro_transito_emitido = False
+estado_analisis_vigilancia = {
+    "disponible": None,
+    "estado": "Iniciando análisis de Cámara USB",
+    "persona_detectada": False,
+    "estado_persona": "Sin persona",
+    "orientacion_rostro": "No determinado",
+    "orientacion_estimada": "No determinada",
+    "visibilidad_facial": "No concluyente",
+    "nivel_alerta": "normal",
+    "pose_disponible": None,
+    "ultima_alerta": None,
+}
 CODIGO_SEGUIMIENTO_RE = re.compile(r"^LSCC-\d{4}-[A-F0-9]{12}$")
 CORREO_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -195,6 +259,23 @@ def crear_tablas_auth_si_no_existen():
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_reportes_estado
             ON reportes_ciudadanos(estado, creado_en DESC);
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS eventos_vigilancia (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                camara TEXT NOT NULL,
+                tipo_evento TEXT NOT NULL,
+                descripcion TEXT NOT NULL,
+                fecha_hora TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                imagen_path TEXT,
+                estado TEXT NOT NULL DEFAULT 'pendiente'
+                    CHECK(estado IN ('pendiente','revisado'))
+            );
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_eventos_vigilancia_fecha
+            ON eventos_vigilancia(fecha_hora DESC);
         """)
 
     migrar_reportes_publicos_si_necesario()
@@ -1203,6 +1284,788 @@ def vigilancia():
     return render_dashboard_tecnico("vigilancia.html")
 
 
+def obtener_modelo_yolo():
+    """Carga el modelo liviano una sola vez y deja el stream operativo si falla."""
+    global modelo_yolo, modelo_yolo_error
+    with analisis_vigilancia_lock:
+        if modelo_yolo is not None:
+            return modelo_yolo
+        if modelo_yolo_error is not None:
+            return None
+        try:
+            from ultralytics import YOLO
+            print(f"[VIGILANCIA] Cargando modelo {YOLO_MODEL_PATH}...")
+            modelo_yolo = YOLO(str(YOLO_MODEL_PATH))
+            estado_analisis_vigilancia["disponible"] = True
+            estado_analisis_vigilancia["estado"] = "Análisis inteligente activo"
+            print("[VIGILANCIA] Modelo de detección listo")
+        except Exception as error:
+            modelo_yolo_error = str(error)
+            estado_analisis_vigilancia["disponible"] = False
+            estado_analisis_vigilancia["estado"] = "Análisis inteligente no disponible"
+            print(f"[VIGILANCIA] Análisis inteligente no disponible: {error}")
+        return modelo_yolo
+
+
+def obtener_modelo_pose():
+    """Carga YOLO Pose una vez; Haar sigue disponible si la carga falla."""
+    global modelo_pose, modelo_pose_error
+    if not DETECCION_POSE_ACTIVA:
+        return None
+    with analisis_vigilancia_lock:
+        if modelo_pose is not None:
+            return modelo_pose
+        if modelo_pose_error is not None:
+            return None
+        try:
+            from ultralytics import YOLO
+            print(f"[VIGILANCIA] Cargando modelo de pose {POSE_MODEL_PATH}...")
+            modelo_pose = YOLO(str(POSE_MODEL_PATH))
+            estado_analisis_vigilancia["pose_disponible"] = True
+            print("[VIGILANCIA] Análisis de orientación disponible")
+        except Exception as error:
+            modelo_pose_error = str(error)
+            estado_analisis_vigilancia["pose_disponible"] = False
+            print(f"[VIGILANCIA] Análisis de orientación no disponible: {error}")
+        return modelo_pose
+
+
+def registrar_evento_vigilancia(frame, tipo_evento, descripcion, cooldown=None):
+    """Guarda una captura puntual y su evento asociado en SQLite."""
+    ahora = time.time()
+    cooldown = EVENTO_VIGILANCIA_COOLDOWN if cooldown is None else cooldown
+    if ahora - ultimo_evento_por_tipo[tipo_evento] < cooldown:
+        return None
+
+    fecha = datetime.now()
+    tipo_archivo = re.sub(r"[^a-z0-9]+", "_", tipo_evento.casefold()).strip("_")
+    nombre = f"evento_{tipo_archivo}_{fecha.strftime('%Y%m%d_%H%M%S')}.jpg"
+    destino = CAPTURAS_VIGILANCIA_DIR / nombre
+    if not cv2.imwrite(str(destino), frame, [cv2.IMWRITE_JPEG_QUALITY, 85]):
+        print(f"[VIGILANCIA] No se pudo guardar captura: {destino}")
+        return None
+
+    ruta_relativa = f"capturas_vigilancia/{nombre}"
+    with get_db() as conn:
+        cursor = conn.execute("""
+            INSERT INTO eventos_vigilancia
+                (camara, tipo_evento, descripcion, fecha_hora, imagen_path, estado)
+            VALUES (?, ?, ?, ?, ?, 'pendiente')
+        """, ("Cámara USB", tipo_evento, descripcion,
+              fecha.strftime("%Y-%m-%d %H:%M:%S"), ruta_relativa))
+        evento_id = cursor.lastrowid
+
+    ultimo_evento_por_tipo[tipo_evento] = ahora
+    alerta = {
+        "id": evento_id,
+        "camara": "Cámara USB",
+        "tipo_evento": tipo_evento,
+        "descripcion": descripcion,
+        "fecha_hora": fecha.strftime("%Y-%m-%d %H:%M:%S"),
+        "imagen_path": ruta_relativa,
+        "estado": "pendiente",
+    }
+    with analisis_vigilancia_lock:
+        estado_analisis_vigilancia["ultima_alerta"] = alerta
+    print(f"[VIGILANCIA] {tipo_evento}; evento #{evento_id} registrado")
+    return alerta
+
+
+def evaluar_reglas_vigilancia(frame, detecciones, ahora=None):
+    """Genera eventos temporales sin reconocer ni identificar personas."""
+    global persona_frames_actuales, persona_frames_ausentes, presencia_confirmada
+    global inicio_presencia, evento_persona_emitido, evento_permanencia_emitido
+    global permanencia_activa, transito_repetitivo_hasta
+    ahora = ahora if ahora is not None else time.time()
+
+    if detecciones:
+        persona_frames_actuales += 1
+        persona_frames_ausentes = 0
+        if persona_frames_actuales < PERSONA_FRAMES_CONSECUTIVOS:
+            return
+
+        confianza = max(item[4] for item in detecciones)
+        if not presencia_confirmada:
+            presencia_confirmada = True
+            inicio_presencia = ahora
+            evento_persona_emitido = False
+            evento_permanencia_emitido = False
+            apariciones_persona.append(ahora)
+            while (apariciones_persona
+                   and ahora - apariciones_persona[0] > TRANSITO_REPETITIVO_VENTANA_SEGUNDOS):
+                apariciones_persona.popleft()
+
+        if not evento_persona_emitido:
+            registrar_evento_vigilancia(
+                frame,
+                "Persona detectada",
+                f"Persona detectada con confianza {confianza:.0%}. Evento de revisión.",
+            )
+            evento_persona_emitido = True
+
+        permanencia = ahora - inicio_presencia if inicio_presencia is not None else 0
+        if (permanencia >= PERMANENCIA_PROLONGADA_SEGUNDOS
+                and not evento_permanencia_emitido):
+            permanencia_activa = True
+            registrar_evento_vigilancia(
+                frame,
+                "Permanencia prolongada",
+                f"Presencia continua durante aproximadamente {int(permanencia)} segundos.",
+            )
+            evento_permanencia_emitido = True
+
+        if len(apariciones_persona) >= TRANSITO_REPETITIVO_APARICIONES:
+            transito_repetitivo_hasta = ahora + ROSTRO_NO_VISIBLE_COOLDOWN
+            registrar_evento_vigilancia(
+                frame,
+                "Tránsito repetitivo",
+                f"Se registraron {len(apariciones_persona)} apariciones en un intervalo corto.",
+            )
+            apariciones_persona.clear()
+    else:
+        persona_frames_actuales = 0
+        persona_frames_ausentes += 1
+        if persona_frames_ausentes >= PERSONA_FRAMES_AUSENTES:
+            presencia_confirmada = False
+            inicio_presencia = None
+            permanencia_activa = False
+            evento_persona_emitido = False
+            evento_permanencia_emitido = False
+
+
+def obtener_detectores_rostro():
+    """Carga cascades locales; no descarga modelos ni almacena rasgos faciales."""
+    global detectores_rostro, detectores_rostro_error
+    if not DETECCION_ROSTRO_ACTIVA or detectores_rostro_error is not None:
+        return None
+    if detectores_rostro is not None:
+        return detectores_rostro
+    try:
+        frontal = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+        perfil = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_profileface.xml"
+        )
+        ojos = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_eye_tree_eyeglasses.xml"
+        )
+        if frontal.empty() or perfil.empty() or ojos.empty():
+            raise RuntimeError("No se pudieron cargar los Haar Cascades")
+        detectores_rostro = (frontal, perfil, ojos)
+        print("[VIGILANCIA] Detección de rostro disponible")
+    except Exception as error:
+        detectores_rostro_error = str(error)
+        print(f"[VIGILANCIA] Detección de rostro no disponible: {error}")
+    return detectores_rostro
+
+
+def estimar_orientacion_pose(frame, deteccion):
+    """Estima frontal, perfil o espalda usando keypoints del recorte de persona."""
+    modelo = obtener_modelo_pose()
+    if modelo is None:
+        return None
+    x1, y1, x2, y2, _confianza = deteccion
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
+    recorte = frame[y1:y2, x1:x2]
+    if recorte.size == 0:
+        return None
+    try:
+        resultado = modelo.predict(
+            source=recorte, conf=0.25, imgsz=256, verbose=False, device="cpu"
+        )[0]
+        with analisis_vigilancia_lock:
+            estado_analisis_vigilancia["pose_disponible"] = True
+        if resultado.keypoints is None or resultado.keypoints.conf is None:
+            return "no_concluyente"
+        confianzas = resultado.keypoints.conf[0].cpu().tolist()
+        nariz, ojo_i, ojo_d, oreja_i, oreja_d = confianzas[:5]
+        hombro_i, hombro_d = confianzas[5:7]
+        facial = [nariz, ojo_i, ojo_d, oreja_i, oreja_d]
+        frontal = (
+            nariz >= CONFIANZA_POSE_MINIMA
+            and ojo_i >= CONFIANZA_ROSTRO_MINIMA
+            and ojo_d >= CONFIANZA_ROSTRO_MINIMA
+        )
+        un_ojo = (ojo_i >= CONFIANZA_ROSTRO_MINIMA) ^ (ojo_d >= CONFIANZA_ROSTRO_MINIMA)
+        un_lado = (
+            (ojo_i >= CONFIANZA_ROSTRO_MINIMA and oreja_i >= CONFIANZA_POSE_MINIMA)
+            or (ojo_d >= CONFIANZA_ROSTRO_MINIMA and oreja_d >= CONFIANZA_POSE_MINIMA)
+        )
+        espalda = (
+            hombro_i >= CONFIANZA_POSE_MINIMA
+            and hombro_d >= CONFIANZA_POSE_MINIMA
+            and max(facial) < CONFIANZA_POSE_MINIMA
+        )
+        if frontal:
+            return "frontal"
+        if (nariz >= CONFIANZA_POSE_MINIMA and un_ojo) or un_lado:
+            return "perfil"
+        if espalda:
+            return "espalda"
+        return "no_concluyente"
+    except Exception as error:
+        print(f"[VIGILANCIA] Error en análisis de orientación: {error}")
+        return None
+
+
+def analizar_orientacion_rostro(frame, detecciones):
+    """Combina pose y Haar; ante duda no genera una alerta fuerte."""
+    global rostro_no_visible_frames, perfil_frames_actuales
+    global espalda_frames_actuales, evento_perfil_emitido, rostro_no_visible_activo
+    global evento_rostro_permanencia_emitido, evento_rostro_transito_emitido
+
+    orientacion = "No determinada"
+    visibilidad = "No concluyente"
+    ahora = time.time()
+
+    if not DETECCION_ROSTRO_ACTIVA:
+        orientacion, visibilidad = "Detección desactivada", "No aplica"
+        rostro_no_visible_activo = False
+    elif not detecciones:
+        rostro_no_visible_frames = perfil_frames_actuales = espalda_frames_actuales = 0
+        rostro_no_visible_activo = False
+        evento_perfil_emitido = False
+    else:
+        deteccion = max(
+            detecciones, key=lambda item: (item[2] - item[0]) * (item[3] - item[1])
+        )
+        x1, y1, x2, y2, _confianza = deteccion
+        alto_superior = max(1, int((y2 - y1) * ROSTRO_REGION_SUPERIOR))
+        sx1, sy1 = max(0, x1), max(0, y1)
+        sx2, sy2 = min(frame.shape[1], x2), min(frame.shape[0], y1 + alto_superior)
+        region = frame[sy1:sy2, sx1:sx2]
+        pose = estimar_orientacion_pose(frame, deteccion)
+        if pose is None and DETECCION_POSE_ACTIVA:
+            with analisis_vigilancia_lock:
+                estado_analisis_vigilancia["pose_disponible"] = False
+
+        rostros = perfiles = ojos_detectados = []
+        detectores = obtener_detectores_rostro()
+        if detectores is not None and region.size:
+            frontal, perfil, ojos = detectores
+            gris = cv2.equalizeHist(cv2.cvtColor(region, cv2.COLOR_BGR2GRAY))
+            rostros = frontal.detectMultiScale(
+                gris, scaleFactor=1.1, minNeighbors=6, minSize=(30, 30)
+            )
+            perfiles = perfil.detectMultiScale(
+                gris, scaleFactor=1.1, minNeighbors=6, minSize=(30, 30)
+            )
+            if len(perfiles) == 0:
+                perfiles = perfil.detectMultiScale(
+                    cv2.flip(gris, 1), scaleFactor=1.1,
+                    minNeighbors=6, minSize=(30, 30)
+                )
+            ojos_detectados = ojos.detectMultiScale(
+                gris, scaleFactor=1.1, minNeighbors=7, minSize=(14, 14)
+            )
+
+        if len(rostros) > 0:
+            orientacion, visibilidad = "Frontal o semi frontal", "Rostro visible"
+            rostro_no_visible_frames = perfil_frames_actuales = espalda_frames_actuales = 0
+            rostro_no_visible_activo = False
+            evento_perfil_emitido = False
+            rx, ry, rw, rh = rostros[0]
+            cv2.rectangle(frame, (sx1 + rx, sy1 + ry),
+                          (sx1 + rx + rw, sy1 + ry + rh), (34, 197, 94), 2)
+        elif len(perfiles) > 0 or pose == "perfil":
+            orientacion, visibilidad = "Perfil", "Parcialmente visible"
+            perfil_frames_actuales += 1
+            rostro_no_visible_frames = espalda_frames_actuales = 0
+            rostro_no_visible_activo = False
+            permanencia = ahora - inicio_presencia if inicio_presencia is not None else 0
+            if (perfil_frames_actuales >= PERFIL_FRAMES_CONSECUTIVOS
+                    and permanencia >= PERMANENCIA_PROLONGADA_SEGUNDOS
+                    and not evento_perfil_emitido):
+                registrar_evento_vigilancia(
+                    frame, "Persona de perfil",
+                    "Actividad inusual para revisión: persona de perfil durante una permanencia prolongada."
+                )
+                evento_perfil_emitido = True
+        elif pose == "espalda":
+            espalda_frames_actuales += 1
+            rostro_no_visible_frames = perfil_frames_actuales = 0
+            rostro_no_visible_activo = False
+            if espalda_frames_actuales >= ESPALDA_FRAMES_CONSECUTIVOS:
+                orientacion, visibilidad = "Persona de espaldas", "No aplica"
+            else:
+                orientacion, visibilidad = "Orientación no frontal", "No concluyente"
+        elif pose == "frontal" or len(ojos_detectados) >= 2:
+            orientacion = "Frontal o semi frontal"
+            rostro_no_visible_frames += 1
+            perfil_frames_actuales = espalda_frames_actuales = 0
+            if rostro_no_visible_frames >= ROSTRO_NO_VISIBLE_FRAMES:
+                visibilidad = "Rostro no visible"
+                rostro_no_visible_activo = True
+                registrar_evento_vigilancia(
+                    frame, "Rostro no visible",
+                    "Persona orientada hacia la cámara sin rostro visible durante varios frames.",
+                    cooldown=ROSTRO_NO_VISIBLE_COOLDOWN,
+                )
+            else:
+                visibilidad = "No concluyente"
+        else:
+            orientacion, visibilidad = "No determinada", "Visibilidad facial no concluyente"
+            rostro_no_visible_frames = perfil_frames_actuales = 0
+            rostro_no_visible_activo = False
+
+        if rostro_no_visible_activo and permanencia_activa:
+            if not evento_rostro_permanencia_emitido:
+                registrar_evento_vigilancia(
+                    frame, "Permanencia con rostro no visible",
+                    "Permanencia prolongada con rostro no visible. Evento de revisión de prioridad alta.",
+                    cooldown=ROSTRO_NO_VISIBLE_COOLDOWN,
+                )
+                evento_rostro_permanencia_emitido = True
+        else:
+            evento_rostro_permanencia_emitido = False
+
+        if rostro_no_visible_activo and ahora <= transito_repetitivo_hasta:
+            if not evento_rostro_transito_emitido:
+                registrar_evento_vigilancia(
+                    frame, "Tránsito repetitivo con rostro no visible",
+                    "Tránsito repetitivo coincidente con rostro no visible. Evento de revisión de prioridad alta.",
+                    cooldown=ROSTRO_NO_VISIBLE_COOLDOWN,
+                )
+                evento_rostro_transito_emitido = True
+        elif ahora > transito_repetitivo_hasta:
+            evento_rostro_transito_emitido = False
+
+    if rostro_no_visible_activo and (permanencia_activa or ahora <= transito_repetitivo_hasta):
+        nivel = "alto"
+    elif rostro_no_visible_activo:
+        nivel = "revisión"
+    elif permanencia_activa or ahora <= transito_repetitivo_hasta:
+        nivel = "medio"
+    elif detecciones:
+        nivel = "bajo"
+    else:
+        nivel = "normal"
+
+    with analisis_vigilancia_lock:
+        estado_analisis_vigilancia["orientacion_rostro"] = orientacion
+        estado_analisis_vigilancia["orientacion_estimada"] = orientacion
+        estado_analisis_vigilancia["visibilidad_facial"] = visibilidad
+        estado_analisis_vigilancia["nivel_alerta"] = nivel
+    return orientacion
+
+
+def analizar_personas(frame):
+    """Procesa un frame y devuelve una copia con las detecciones dibujadas."""
+    modelo = obtener_modelo_yolo()
+    if modelo is None:
+        return frame
+
+    try:
+        resultado = modelo.predict(
+            source=frame,
+            classes=[0],
+            conf=PERSONA_CONFIANZA_MINIMA,
+            imgsz=416,
+            verbose=False,
+            device="cpu",
+        )[0]
+        detecciones = []
+        for caja in resultado.boxes:
+            confianza = float(caja.conf[0])
+            x1, y1, x2, y2 = map(int, caja.xyxy[0].tolist())
+            detecciones.append((x1, y1, x2, y2, confianza))
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (37, 99, 235), 2)
+            cv2.putText(frame, f"Persona {confianza:.0%}", (x1, max(22, y1 - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (37, 99, 235), 2)
+
+        evaluar_reglas_vigilancia(frame, detecciones)
+        analizar_orientacion_rostro(frame, detecciones)
+        with analisis_vigilancia_lock:
+            estado_analisis_vigilancia["disponible"] = True
+            estado_analisis_vigilancia["persona_detectada"] = bool(detecciones)
+            estado_analisis_vigilancia["estado_persona"] = (
+                "Persona detectada" if detecciones else "Sin persona"
+            )
+            estado_analisis_vigilancia["estado"] = (
+                "Persona detectada" if detecciones else "Análisis inteligente activo"
+            )
+        return frame
+    except Exception as error:
+        with analisis_vigilancia_lock:
+            estado_analisis_vigilancia["disponible"] = False
+            estado_analisis_vigilancia["estado"] = "Análisis inteligente no disponible"
+        print(f"[VIGILANCIA] Error procesando frame: {error}")
+        return frame
+
+
+def abrir_camara_usb():
+    """Abre exclusivamente la cámara USB física; nunca usa OBS como fallback."""
+    try:
+        dispositivos = FilterGraph().get_input_devices()
+        nombre_dispositivo = (
+            dispositivos[USB_CAMERA_INDEX]
+            if USB_CAMERA_INDEX < len(dispositivos)
+            else None
+        )
+    except Exception as error:
+        nombre_dispositivo = None
+        print(f"[CAM USB] No se pudieron enumerar nombres DirectShow: {error}")
+
+    if nombre_dispositivo and "obs" in nombre_dispositivo.casefold():
+        print(
+            f"[CAM USB] Advertencia: se está usando OBS Virtual Camera "
+            f"en el índice {USB_CAMERA_INDEX}; selección rechazada"
+        )
+        return None
+    if nombre_dispositivo:
+        print(
+            f"[CAM USB] Cámara física seleccionada: {nombre_dispositivo} "
+            f"(índice {USB_CAMERA_INDEX})"
+        )
+
+    intentos_apertura = (
+        ("DSHOW (índice y backend)", lambda: cv2.VideoCapture(USB_CAMERA_INDEX, cv2.CAP_DSHOW)),
+        ("DSHOW (backend + índice)", lambda: cv2.VideoCapture(cv2.CAP_DSHOW + USB_CAMERA_INDEX)),
+        ("MSMF", lambda: cv2.VideoCapture(USB_CAMERA_INDEX, cv2.CAP_MSMF)),
+        ("AUTO", lambda: cv2.VideoCapture(USB_CAMERA_INDEX)),
+    )
+
+    for nombre_backend, crear_captura in intentos_apertura:
+        print(
+            f"[CAM USB] Intentando abrir cámara índice "
+            f"{USB_CAMERA_INDEX} con {nombre_backend}"
+        )
+        captura = crear_captura()
+        captura.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        captura.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        captura.set(cv2.CAP_PROP_FPS, 20)
+
+        if captura.isOpened():
+            disponible, _frame = captura.read()
+            if disponible:
+                print(
+                    f"[CAM USB] Cámara USB detectada en índice "
+                    f"{USB_CAMERA_INDEX} con {nombre_backend}"
+                )
+                return captura
+            print(f"[CAM USB] No se pudo leer frame con {nombre_backend}")
+
+        captura.release()
+
+    print(
+        "[CAM USB] USB CAMERA detectada por DirectShow, pero OpenCV no pudo "
+        "abrirla. Verificar si está ocupada por otra aplicación o permisos de Windows."
+    )
+    return None
+
+
+def reiniciar_presencia_vigilancia():
+    """Evita conservar temporizadores si la cámara se desconecta."""
+    global persona_frames_actuales, persona_frames_ausentes, presencia_confirmada
+    global inicio_presencia, evento_persona_emitido, evento_permanencia_emitido
+    global rostro_no_visible_frames, perfil_frames_actuales
+    global espalda_frames_actuales, evento_perfil_emitido
+    global rostro_no_visible_activo, permanencia_activa, transito_repetitivo_hasta
+    global evento_rostro_permanencia_emitido, evento_rostro_transito_emitido
+    persona_frames_actuales = 0
+    persona_frames_ausentes = 0
+    presencia_confirmada = False
+    inicio_presencia = None
+    evento_persona_emitido = False
+    evento_permanencia_emitido = False
+    rostro_no_visible_frames = 0
+    perfil_frames_actuales = 0
+    espalda_frames_actuales = 0
+    evento_perfil_emitido = False
+    rostro_no_visible_activo = False
+    permanencia_activa = False
+    transito_repetitivo_hasta = 0.0
+    evento_rostro_permanencia_emitido = False
+    evento_rostro_transito_emitido = False
+    apariciones_persona.clear()
+    with analisis_vigilancia_lock:
+        estado_analisis_vigilancia["orientacion_rostro"] = "No determinado"
+        estado_analisis_vigilancia["orientacion_estimada"] = "No determinada"
+        estado_analisis_vigilancia["visibilidad_facial"] = "No concluyente"
+        estado_analisis_vigilancia["nivel_alerta"] = "normal"
+
+
+class ServicioCamaraUSB:
+    """Único propietario de la cámara física y del último frame compartido."""
+
+    def __init__(self):
+        self._inicio_lock = threading.Lock()
+        self._condicion = threading.Condition()
+        self._ultimo_frame = None
+        self._secuencia = 0
+        self._disponible = False
+        self._hilo = None
+        self._detener = threading.Event()
+
+    @property
+    def disponible(self):
+        with self._condicion:
+            return self._disponible
+
+    def iniciar(self):
+        with self._inicio_lock:
+            if self._hilo and self._hilo.is_alive():
+                return
+            self._detener.clear()
+            self._hilo = threading.Thread(
+                target=self._ejecutar,
+                name="camara-usb-inteligente",
+                daemon=True,
+            )
+            self._hilo.start()
+            print("[CAM USB] Servicio de análisis en segundo plano iniciado")
+
+    def detener(self):
+        self._detener.set()
+        with self._condicion:
+            self._condicion.notify_all()
+        if self._hilo and self._hilo.is_alive():
+            self._hilo.join(timeout=3)
+
+    def obtener_frame(self, secuencia_anterior=-1, timeout=5):
+        with self._condicion:
+            self._condicion.wait_for(
+                lambda: self._secuencia != secuencia_anterior or self._detener.is_set(),
+                timeout=timeout,
+            )
+            if self._ultimo_frame is None or self._secuencia == secuencia_anterior:
+                return None
+            return self._secuencia, self._ultimo_frame.copy()
+
+    def _publicar_frame(self, frame):
+        with self._condicion:
+            self._ultimo_frame = frame
+            self._secuencia += 1
+            self._condicion.notify_all()
+
+    def _marcar_disponible(self, disponible):
+        with self._condicion:
+            self._disponible = disponible
+            if not disponible:
+                self._ultimo_frame = None
+            self._condicion.notify_all()
+
+    def _ejecutar(self):
+        while not self._detener.is_set():
+            captura = abrir_camara_usb()
+            if captura is None:
+                self._marcar_disponible(False)
+                with analisis_vigilancia_lock:
+                    estado_analisis_vigilancia["disponible"] = False
+                    estado_analisis_vigilancia["estado"] = "Cámara USB física no disponible"
+                self._detener.wait(5)
+                continue
+
+            self._marcar_disponible(True)
+            reiniciar_presencia_vigilancia()
+            numero_frame = 0
+            try:
+                while not self._detener.is_set():
+                    disponible, frame = captura.read()
+                    if not disponible:
+                        print(f"[CAM USB] No se pudo leer frame del índice {USB_CAMERA_INDEX}")
+                        break
+                    numero_frame += 1
+                    frame_salida = frame
+                    if numero_frame % ANALISIS_CADA_N_FRAMES == 0:
+                        frame_salida = analizar_personas(frame.copy())
+                    self._publicar_frame(frame_salida)
+            finally:
+                captura.release()
+                self._marcar_disponible(False)
+                reiniciar_presencia_vigilancia()
+                print("[CAM USB] Captura liberada; reintentando conexión")
+            self._detener.wait(2)
+
+
+servicio_camara_usb = ServicioCamaraUSB()
+
+
+def generar_video_usb():
+    """Transmite el último frame compartido sin volver a abrir la cámara."""
+    secuencia = -1
+    while True:
+        resultado = servicio_camara_usb.obtener_frame(secuencia)
+        if resultado is None:
+            if not servicio_camara_usb.disponible:
+                return
+            continue
+        secuencia, frame = resultado
+        codificado, buffer = cv2.imencode(
+            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75]
+        )
+        if not codificado:
+            continue
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n" + buffer.tobytes() + b"\r\n"
+        )
+
+
+@app.route("/video_usb")
+@login_requerido
+@trabajador_o_admin_requerido
+def video_usb():
+    servicio_camara_usb.iniciar()
+    if not servicio_camara_usb.disponible:
+        return "Cámara USB física no disponible", 503
+
+    return Response(
+        generar_video_usb(),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
+
+
+EVENTOS_VIGILANCIA_ALTO = {
+    "Permanencia con rostro no visible",
+    "Tránsito repetitivo con rostro no visible",
+}
+EVENTOS_VIGILANCIA_REVISION = {
+    "Rostro no visible",
+    "Persona de perfil",
+    "Permanencia prolongada",
+    "Tránsito repetitivo",
+}
+
+
+def nivel_evento_vigilancia(tipo_evento):
+    if tipo_evento in EVENTOS_VIGILANCIA_ALTO:
+        return "alto"
+    if tipo_evento in EVENTOS_VIGILANCIA_REVISION:
+        return "revision"
+    return "informativo"
+
+
+def obtener_eventos_vigilancia(limite=10, nivel=None, tipo=None):
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT id, camara, tipo_evento, descripcion, fecha_hora,
+                   imagen_path, estado
+            FROM eventos_vigilancia
+            ORDER BY fecha_hora DESC, id DESC
+            LIMIT 200
+        """).fetchall()
+    eventos = []
+    for row in rows:
+        evento = dict(row)
+        evento["nivel"] = nivel_evento_vigilancia(evento["tipo_evento"])
+        if nivel and nivel != "todos" and evento["nivel"] != nivel:
+            continue
+        if tipo and tipo != "todos" and evento["tipo_evento"] != tipo:
+            continue
+        eventos.append(evento)
+        if len(eventos) >= limite:
+            break
+    return eventos
+
+
+@app.route("/api/vigilancia/estado")
+@login_requerido
+@trabajador_o_admin_requerido
+def api_vigilancia_estado():
+    eventos = obtener_eventos_vigilancia(1)
+    with analisis_vigilancia_lock:
+        respuesta = dict(estado_analisis_vigilancia)
+    respuesta["ultima_alerta"] = eventos[0] if eventos else None
+    respuesta["configuracion"] = {
+        "modelo": YOLO_MODEL_NAME,
+        "confianza_minima": PERSONA_CONFIANZA_MINIMA,
+        "cada_n_frames": ANALISIS_CADA_N_FRAMES,
+        "frames_consecutivos": PERSONA_FRAMES_CONSECUTIVOS,
+        "cooldown_segundos": EVENTO_VIGILANCIA_COOLDOWN,
+        "permanencia_segundos": PERMANENCIA_PROLONGADA_SEGUNDOS,
+        "transito_apariciones": TRANSITO_REPETITIVO_APARICIONES,
+        "transito_ventana_segundos": TRANSITO_REPETITIVO_VENTANA_SEGUNDOS,
+        "deteccion_rostro_activa": DETECCION_ROSTRO_ACTIVA,
+        "deteccion_pose_activa": DETECCION_POSE_ACTIVA,
+        "modelo_pose": POSE_MODEL_NAME,
+        "rostro_region_superior": ROSTRO_REGION_SUPERIOR,
+        "rostro_no_visible_frames": ROSTRO_NO_VISIBLE_FRAMES,
+        "rostro_no_visible_cooldown": ROSTRO_NO_VISIBLE_COOLDOWN,
+        "confianza_pose_minima": CONFIANZA_POSE_MINIMA,
+        "confianza_rostro_minima": CONFIANZA_ROSTRO_MINIMA,
+        "perfil_frames_consecutivos": PERFIL_FRAMES_CONSECUTIVOS,
+        "espalda_frames_consecutivos": ESPALDA_FRAMES_CONSECUTIVOS,
+    }
+    return jsonify(respuesta)
+
+
+@app.route("/api/vigilancia/eventos")
+@login_requerido
+@trabajador_o_admin_requerido
+def api_vigilancia_eventos():
+    try:
+        limite = max(1, min(int(request.args.get("limite", 10)), 50))
+    except (TypeError, ValueError):
+        limite = 10
+    nivel = request.args.get("nivel", "todos").strip().lower()
+    if nivel not in {"todos", "alto", "revision", "informativo"}:
+        nivel = "todos"
+    tipo = request.args.get("tipo", "todos").strip()
+    return jsonify(obtener_eventos_vigilancia(limite, nivel=nivel, tipo=tipo))
+
+
+@app.route("/api/vigilancia/resumen")
+@login_requerido
+@trabajador_o_admin_requerido
+def api_vigilancia_resumen():
+    eventos = obtener_eventos_vigilancia(50)
+    tipos_tarjeta = (
+        ("Persona detectada", "informativo"),
+        ("Permanencia prolongada", "revision"),
+        ("Rostro no visible", "revision"),
+        ("Tránsito repetitivo", "revision"),
+    )
+    tarjetas = []
+    for tipo, nivel in tipos_tarjeta:
+        coincidencias = [evento for evento in eventos if evento["tipo_evento"] == tipo]
+        tarjetas.append({
+            "tipo_evento": tipo,
+            "cantidad": len(coincidencias),
+            "ultima_hora": coincidencias[0]["fecha_hora"] if coincidencias else None,
+            "nivel": nivel,
+        })
+    eventos_altos = [evento for evento in eventos if evento["nivel"] == "alto"]
+    tarjetas.append({
+        "tipo_evento": "Eventos de nivel alto",
+        "cantidad": len(eventos_altos),
+        "ultima_hora": eventos_altos[0]["fecha_hora"] if eventos_altos else None,
+        "nivel": "alto",
+    })
+    tipos_importantes = EVENTOS_VIGILANCIA_ALTO | {"Rostro no visible"}
+    ultima_importante = next(
+        (evento for evento in eventos if evento["tipo_evento"] in tipos_importantes),
+        None,
+    )
+    tipos_disponibles = sorted({evento["tipo_evento"] for evento in eventos})
+    return jsonify({
+        "tarjetas": tarjetas,
+        "ultima_importante": ultima_importante,
+        "tipos_disponibles": tipos_disponibles,
+    })
+
+
+@app.route("/api/vigilancia/eventos/<int:evento_id>/revisar", methods=["POST"])
+@login_requerido
+@trabajador_o_admin_requerido
+def api_vigilancia_evento_revisar(evento_id):
+    with get_db() as conn:
+        cursor = conn.execute("""
+            UPDATE eventos_vigilancia
+            SET estado = 'revisado'
+            WHERE id = ? AND estado = 'pendiente'
+        """, (evento_id,))
+        existe = conn.execute(
+            "SELECT id, estado FROM eventos_vigilancia WHERE id = ?", (evento_id,)
+        ).fetchone()
+    if not existe:
+        return jsonify({"error": "Evento no encontrado"}), 404
+    return jsonify({"id": evento_id, "estado": existe["estado"], "actualizado": cursor.rowcount > 0})
+
+
 @app.route("/ambiente")
 @login_requerido
 @trabajador_o_admin_requerido
@@ -1705,5 +2568,6 @@ if __name__ == "__main__":
 
     hilo = threading.Thread(target=iniciar_mqtt, daemon=True)
     hilo.start()
+    servicio_camara_usb.iniciar()
 
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)

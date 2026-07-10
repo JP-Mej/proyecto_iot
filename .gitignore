@@ -32,7 +32,9 @@ venv/
 *.db-journal
 dashboard/imagenes/
 dashboard/reportes_adjuntos/
+dashboard/static/capturas_vigilancia/
 datalake_local/
+*.pt
 
 # Modelos, datasets y notebooks locales
 models/
