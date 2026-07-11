@@ -217,6 +217,31 @@ function actualizarNodoAmbiental(data) {
     setBar("gasBar", gasPct, gasCls);
 }
 
+/* ── Riesgo IA ambiental (Random Forest Normal/Incendio) ── */
+function actualizarRiesgoML(data) {
+    const valorEl = document.getElementById("riesgoMlValor");
+    if (!valorEl) return;
+    const detalleEl = document.getElementById("riesgoMlDetalle");
+    const card = document.getElementById("riesgoMlCard");
+    const online = nodoOnline(data.ultima_vez_modulos, "ESP32_AIRE_01", 60);
+    const riesgo = data.ambiental?.riesgo_ml;
+
+    if (!online || !riesgo) {
+        valorEl.textContent = "--";
+        if (detalleEl) detalleEl.textContent = online ? "Modelo no disponible" : "Nodo offline";
+        if (card) card.classList.remove("ml-alerta", "ml-ok");
+        return;
+    }
+
+    const esIncendio = riesgo.prediccion === "Incendio";
+    valorEl.textContent = esIncendio ? "⚠ Incendio" : "Normal";
+    if (detalleEl) detalleEl.textContent = `Confianza: ${riesgo.confianza}% · Random Forest`;
+    if (card) {
+        card.classList.toggle("ml-alerta", esIncendio);
+        card.classList.toggle("ml-ok", !esIncendio);
+    }
+}
+
 /* ── Resumen de residuos ── */
 function actualizarResumenResiduos(data) {
     const tachos = data.residuos?.tachos || {};
@@ -369,6 +394,7 @@ async function cargarDatos() {
 
         // Nodo ambiental + barras
         actualizarNodoAmbiental(data);
+        actualizarRiesgoML(data);
         // Tachos 1-4; si el nodo está offline se muestra sin datos
         const tachos = data.residuos?.tachos || {};
         const resOnline = nodoOnline(data.ultima_vez_modulos, "ESP32_RESIDUOS_01", 60);

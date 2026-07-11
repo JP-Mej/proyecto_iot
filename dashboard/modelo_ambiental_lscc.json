@@ -1,0 +1,19 @@
+{
+  "features": [
+    "temperatura_c",
+    "humedad_pct",
+    "presion_hpa",
+    "gas_voltios"
+  ],
+  "clases": [
+    "Incendio",
+    "Normal"
+  ],
+  "filas_entrenamiento": 1305,
+  "fraccion_anomalias": 0.04,
+  "entrenado_en": "2026-07-10T12:57:40",
+  "f1_incendio": 1.0,
+  "f1_macro_cv5_media": 0.9891,
+  "f1_macro_cv5_desv": 0.0134,
+  "origen_datos": "lecturas_ambientales (SQLite) + anomalías sintéticas graduadas (60% declaradas, 25% incipientes, 15% humo-sin-calor)"
+}

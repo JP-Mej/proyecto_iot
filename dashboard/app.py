@@ -26,6 +26,7 @@ import sqlite3
 import secrets
 import ssl
 import re
+import requests
 os.environ["OPENCV_VIDEOIO_PRIORITY_OBSENSOR"] = "0"
 import cv2
 from pygrabber.dshow_graph import FilterGraph
@@ -52,6 +53,10 @@ MQTT_CERTFILE = os.environ.get("MQTT_CERTFILE", "")
 MQTT_KEYFILE  = os.environ.get("MQTT_KEYFILE", "")
 MQTT_KEEPALIVE = int(os.environ.get("MQTT_KEEPALIVE", "60"))
 DEVICE_OFFLINE_SECONDS = int(os.environ.get("DEVICE_OFFLINE_SECONDS", "30"))
+
+# Bot de WhatsApp (microservicio Node.js aparte, ver whatsapp_bot/)
+WHATSAPP_BOT_URL = os.environ.get("WHATSAPP_BOT_URL", "").rstrip("/")
+WHATSAPP_BOT_TOKEN = os.environ.get("WHATSAPP_BOT_TOKEN", "")
 USB_CAMERA_INDEX = 0
 OBS_CAMERA_INDEX = 1
 YOLO_MODEL_NAME = "yolov8n.pt"
@@ -68,11 +73,21 @@ DETECCION_ROSTRO_ACTIVA = True
 DETECCION_POSE_ACTIVA = True
 POSE_MODEL_NAME = "yolov8n-pose.pt"
 POSE_MODEL_PATH = BASE_DIR / POSE_MODEL_NAME
-ROSTRO_REGION_SUPERIOR = 0.40
+ROSTRO_REGION_SUPERIOR = 0.60
 ROSTRO_NO_VISIBLE_FRAMES = 8
 ROSTRO_NO_VISIBLE_COOLDOWN = 30
 CONFIANZA_POSE_MINIMA = 0.35
 CONFIANZA_ROSTRO_MINIMA = 0.40
+# Detector facial DNN (YuNet) — detecta rostros frontales, en ángulo y de perfil;
+# los Haar Cascades quedan solo como respaldo si falta el .onnx
+YUNET_MODEL_NAME = "face_detection_yunet_2023mar.onnx"
+YUNET_MODEL_PATH = BASE_DIR / YUNET_MODEL_NAME
+CONFIANZA_YUNET_MINIMA = 0.6
+# Modelo ML ambiental (Random Forest, entrenar_modelo_ambiental.py):
+# clasifica 'Normal'/'Incendio' con temperatura, humedad, presión y gas (V)
+MODELO_AMBIENTAL_NAME = "modelo_ambiental_lscc.pkl"
+MODELO_AMBIENTAL_PATH = BASE_DIR / MODELO_AMBIENTAL_NAME
+RIESGO_INCENDIO_CONSECUTIVOS = 3
 PERFIL_FRAMES_CONSECUTIVOS = 8
 ESPALDA_FRAMES_CONSECUTIVOS = 10
 
@@ -131,6 +146,11 @@ apariciones_persona = deque()
 ultimo_evento_por_tipo = defaultdict(float)
 detectores_rostro = None
 detectores_rostro_error = None
+detector_yunet = None
+detector_yunet_error = None
+modelo_ambiental = None
+modelo_ambiental_error = None
+riesgo_incendio_consecutivos = 0
 rostro_no_visible_frames = 0
 perfil_frames_actuales = 0
 espalda_frames_actuales = 0
@@ -209,9 +229,14 @@ def crear_tablas_auth_si_no_existen():
                 rol TEXT NOT NULL DEFAULT 'usuario',
                 active_session_token TEXT,
                 ultimo_login TEXT,
+                telefono TEXT,
                 creado_en TEXT NOT NULL DEFAULT (datetime('now','localtime'))
             );
         """)
+
+        columnas_usuarios = {fila["name"] for fila in conn.execute("PRAGMA table_info(usuarios)").fetchall()}
+        if "telefono" not in columnas_usuarios:
+            conn.execute("ALTER TABLE usuarios ADD COLUMN telefono TEXT")
 
         existe = conn.execute(
             "SELECT id, password_hash FROM usuarios WHERE username = ?", ("admin",)
@@ -510,6 +535,10 @@ def registro():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         confirmar = request.form.get("confirmar", "")
+        telefono = re.sub(r"[^0-9+]", "", request.form.get("telefono", "").strip())
+        if telefono and not telefono.startswith("+") and len(telefono) == 9 and telefono.startswith("9"):
+            # Celular peruano sin código de país (ej: 987654321) -> anteponer +51
+            telefono = "+51" + telefono
 
         if not username or not password:
             return render_template("registro.html", error="Completa usuario y contraseña.")
@@ -519,13 +548,15 @@ def registro():
             return render_template("registro.html", error="La contraseña debe tener al menos 10 caracteres.")
         if password != confirmar:
             return render_template("registro.html", error="Las contraseñas no coinciden.")
+        if telefono and not re.fullmatch(r"\+?[0-9]{9,15}", telefono):
+            return render_template("registro.html", error="Ingresa un celular válido (solo números, con código de país opcional, ej: +51987654321) o deja el campo vacío.")
 
         try:
             with get_db() as conn:
                 conn.execute("""
-                    INSERT INTO usuarios (username, password_hash, rol)
-                    VALUES (?, ?, 'usuario')
-                """, (username, generate_password_hash(password)))
+                    INSERT INTO usuarios (username, password_hash, rol, telefono)
+                    VALUES (?, ?, 'usuario', ?)
+                """, (username, generate_password_hash(password), telefono or None))
             return redirect(url_for("login", mensaje="usuario_creado"))
         except sqlite3.IntegrityError:
             return render_template("registro.html", error="Ese usuario ya existe. Elige otro nombre.")
@@ -882,6 +913,26 @@ def validar_imagen_subida(archivo):
     return {"jpeg": "jpg", "png": "png", "webp": "webp"}.get(formato)
 
 
+def enviar_whatsapp(telefono, mensaje):
+    """Pide al microservicio Node (whatsapp_bot/) que envíe un WhatsApp.
+
+    No lanza excepción hacia el llamador: una falla en la notificación
+    (bot caído, número inválido, etc.) nunca debe romper la actualización
+    del reporte.
+    """
+    if not telefono or not WHATSAPP_BOT_URL:
+        return
+    try:
+        requests.post(
+            f"{WHATSAPP_BOT_URL}/enviar",
+            json={"telefono": telefono, "mensaje": mensaje},
+            headers={"Authorization": f"Bearer {WHATSAPP_BOT_TOKEN}"},
+            timeout=10,
+        )
+    except requests.RequestException:
+        app.logger.exception("No se pudo enviar la notificación de WhatsApp a %s", telefono)
+
+
 def obtener_contadores_reportes(solo_usuario_id=None):
     where = ""
     params = []
@@ -925,12 +976,33 @@ def limite_reporte_publico_superado(ip):
     return False
 
 
+def hace_cuanto(marca_tiempo):
+    """Humaniza un timestamp 'YYYY-MM-DD HH:MM:SS' (hora local) tipo 'hace 12 min'."""
+    if not marca_tiempo:
+        return None
+    try:
+        entonces = datetime.strptime(marca_tiempo, "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+    segundos = max((datetime.now() - entonces).total_seconds(), 0)
+    if segundos < 60:
+        return "hace unos segundos"
+    minutos = int(segundos // 60)
+    if minutos < 60:
+        return f"hace {minutos} min"
+    horas = int(minutos // 60)
+    if horas < 24:
+        return f"hace {horas} h"
+    return f"hace {int(horas // 24)} d"
+
+
 def resumen_urbano_publico():
     with lock:
         conexion = estado.get("conexion_mqtt")
         ultima = estado.get("ultima_actualizacion")
         ultima_vez = dict(estado.get("ultima_vez_modulos") or {})
         tachos = dict((estado.get("residuos") or {}).get("tachos") or {})
+        riesgo_ml = dict((estado.get("ambiental") or {}).get("riesgo_ml") or {})
     ahora = time.time()
     edades = [ahora - ts for ts in ultima_vez.values() if isinstance(ts, (int, float)) and ts > 0]
     reciente = bool(edades and min(edades) <= 120)
@@ -940,10 +1012,40 @@ def resumen_urbano_publico():
         general = "Datos en actualización"
     else:
         general = "Sin conexión reciente"
+
+    with get_db() as conn:
+        dispositivos_total = conn.execute(
+            "SELECT COUNT(*) AS n FROM dispositivos WHERE activo = 1"
+        ).fetchone()["n"]
+        dispositivos_activos = conn.execute("""
+            SELECT COUNT(*) AS n FROM dispositivos
+            WHERE activo = 1 AND ultima_vez >= datetime('now', '-1 day', 'localtime')
+        """).fetchone()["n"]
+        ultima_lectura_ambiental = conn.execute(
+            "SELECT MAX(timestamp) AS t FROM lecturas_ambientales"
+        ).fetchone()["t"]
+        ultima_lectura_residuos = conn.execute(
+            "SELECT MAX(timestamp) AS t FROM lecturas_residuos"
+        ).fetchone()["t"]
+        reportes_semana = conn.execute("""
+            SELECT COUNT(*) AS n FROM reportes_ciudadanos
+            WHERE creado_en >= datetime('now', '-7 days', 'localtime')
+        """).fetchone()["n"]
+
     ambiental_reciente = any(
         ahora - ultima_vez.get(dispositivo, 0) <= 120
         for dispositivo in ("ESP32_AIRE_01",) if ultima_vez.get(dispositivo)
     )
+    prediccion_ml = riesgo_ml.get("prediccion")
+    if prediccion_ml == "Incendio":
+        ambiente_texto = "Riesgo de incendio detectado"
+    elif prediccion_ml == "Normal":
+        ambiente_texto = "Ambiente normal"
+    elif ambiental_reciente:
+        ambiente_texto = "Lecturas ambientales disponibles"
+    else:
+        ambiente_texto = "Sin datos recientes"
+
     requieren_atencion = sum(
         1 for t in tachos.values()
         if isinstance(t, dict) and (t.get("porcentaje_llenado") or 0) >= 80
@@ -957,14 +1059,91 @@ def resumen_urbano_publico():
         estado_recojo = "Atención de recojo pendiente"
     return {
         "general": general,
-        "ambiente": "Lecturas ambientales disponibles" if ambiental_reciente else "Sin datos recientes",
+        "dispositivos_activos": dispositivos_activos,
+        "dispositivos_total": dispositivos_total,
+        "ambiente": ambiente_texto,
+        "ambiente_actualizado": hace_cuanto(ultima_lectura_ambiental),
         "contenedores": 4,
         "requieren_atencion": min(requieren_atencion, 4),
         "estado_recojo": estado_recojo,
+        "residuos_actualizado": hace_cuanto(ultima_lectura_residuos),
         "ultima_ruta_recojo": ultima_ruta["fecha_generacion"] if ultima_ruta else "Sin planificación reciente",
         "reportes": obtener_contadores_reportes(),
+        "reportes_semana": reportes_semana,
         "ultima_actualizacion": ultima or "Sin actualización reciente",
     }
+
+# ============================================================
+# MODELO ML AMBIENTAL (Normal / Incendio)
+# ============================================================
+def obtener_modelo_ambiental():
+    """Carga el Random Forest una vez; si falta el .pkl la página sigue sin ML."""
+    global modelo_ambiental, modelo_ambiental_error
+    if modelo_ambiental is not None:
+        return modelo_ambiental
+    if modelo_ambiental_error is not None:
+        return None
+    try:
+        if not MODELO_AMBIENTAL_PATH.exists():
+            raise FileNotFoundError(
+                f"No existe {MODELO_AMBIENTAL_NAME} (ejecuta entrenar_modelo_ambiental.py)"
+            )
+        import joblib
+        modelo_ambiental = joblib.load(MODELO_AMBIENTAL_PATH)
+        print("[ML] Modelo ambiental Normal/Incendio cargado")
+    except Exception as error:
+        modelo_ambiental_error = str(error)
+        print(f"[ML] Modelo ambiental no disponible: {error}")
+    return modelo_ambiental
+
+
+def evaluar_riesgo_ambiental(device_id):
+    """Predice Normal/Incendio con las últimas 4 variables. Requiere `lock` tomado."""
+    global riesgo_incendio_consecutivos
+    modelo = obtener_modelo_ambiental()
+    if modelo is None:
+        return
+
+    amb = estado["ambiental"]
+    gas = amb.get("gas") or {}
+    crudos = [amb.get("temperatura"), amb.get("humedad"), amb.get("presion"), gas.get("voltage")]
+    try:
+        fila = [float(v) for v in crudos]
+    except (TypeError, ValueError):
+        return
+    # Lecturas de error del hardware (-1) no se evalúan
+    if fila[0] <= 0 or fila[1] <= 0 or fila[2] <= 0 or fila[3] < 0:
+        return
+
+    try:
+        prediccion = str(modelo.predict([fila])[0])
+        confianza = float(max(modelo.predict_proba([fila])[0]))
+    except Exception as error:
+        print(f"[ML] Error en predicción ambiental: {error}")
+        return
+
+    if prediccion == "Incendio":
+        riesgo_incendio_consecutivos += 1
+    else:
+        riesgo_incendio_consecutivos = 0
+
+    amb["riesgo_ml"] = {
+        "prediccion": prediccion,
+        "confianza": round(confianza * 100, 1),
+        "consecutivos": riesgo_incendio_consecutivos,
+    }
+
+    # Alerta solo con N predicciones seguidas; db_insert_alerta aplica su antirrebote
+    if prediccion == "Incendio" and riesgo_incendio_consecutivos >= RIESGO_INCENDIO_CONSECUTIVOS:
+        db_insert_alerta(
+            device_id,
+            "ambiental",
+            "riesgo_incendio_ml",
+            f"Modelo ML detecta patrón de incendio ({confianza*100:.0f}% confianza) — "
+            f"T={fila[0]:.1f}°C · H={fila[1]:.0f}%HR · Gas={fila[3]:.2f}V",
+            "alta"
+        )
+
 
 # ============================================================
 # CALLBACKS MQTT
@@ -1112,6 +1291,9 @@ def on_message(client, userdata, msg):
                     f"MQ-2 nivel {nivel} — voltaje {voltage} V",
                     prioridad
                 )
+
+            # El gas cierra la ráfaga de publicación: evaluar riesgo con las 4 variables
+            evaluar_riesgo_ambiental(device_id)
 
         elif topic == "lscc/residuos/nivel":
             sensor_id = str(data.get("sensor_id", "1"))
@@ -1433,6 +1615,27 @@ def evaluar_reglas_vigilancia(frame, detecciones, ahora=None):
             evento_permanencia_emitido = False
 
 
+def obtener_detector_yunet():
+    """Carga YuNet (DNN) una vez; detecta rostros frontales, en ángulo y de perfil."""
+    global detector_yunet, detector_yunet_error
+    if not DETECCION_ROSTRO_ACTIVA or detector_yunet_error is not None:
+        return None
+    if detector_yunet is not None:
+        return detector_yunet
+    try:
+        if not YUNET_MODEL_PATH.exists():
+            raise FileNotFoundError(f"No existe {YUNET_MODEL_PATH}")
+        detector_yunet = cv2.FaceDetectorYN_create(
+            str(YUNET_MODEL_PATH), "", (320, 320),
+            CONFIANZA_YUNET_MINIMA, 0.3, 50
+        )
+        print("[VIGILANCIA] Detector facial YuNet disponible")
+    except Exception as error:
+        detector_yunet_error = str(error)
+        print(f"[VIGILANCIA] YuNet no disponible, se usará Haar: {error}")
+    return detector_yunet
+
+
 def obtener_detectores_rostro():
     """Carga cascades locales; no descarga modelos ni almacena rasgos faciales."""
     global detectores_rostro, detectores_rostro_error
@@ -1542,27 +1745,37 @@ def analizar_orientacion_rostro(frame, detecciones):
                 estado_analisis_vigilancia["pose_disponible"] = False
 
         rostros = perfiles = ojos_detectados = []
-        detectores = obtener_detectores_rostro()
-        if detectores is not None and region.size:
-            frontal, perfil, ojos = detectores
-            gris = cv2.equalizeHist(cv2.cvtColor(region, cv2.COLOR_BGR2GRAY))
-            rostros = frontal.detectMultiScale(
-                gris, scaleFactor=1.1, minNeighbors=6, minSize=(30, 30)
-            )
-            perfiles = perfil.detectMultiScale(
-                gris, scaleFactor=1.1, minNeighbors=6, minSize=(30, 30)
-            )
-            if len(perfiles) == 0:
-                perfiles = perfil.detectMultiScale(
-                    cv2.flip(gris, 1), scaleFactor=1.1,
-                    minNeighbors=6, minSize=(30, 30)
+        yunet = obtener_detector_yunet()
+        if yunet is not None and region.size:
+            alto_region, ancho_region = region.shape[:2]
+            yunet.setInputSize((ancho_region, alto_region))
+            _retval, caras = yunet.detect(region)
+            if caras is not None and len(caras) > 0:
+                # Cada fila YuNet: [x, y, ancho, alto, ...landmarks, score]
+                rostros = [tuple(int(v) for v in cara[:4]) for cara in caras]
+        elif region.size:
+            detectores = obtener_detectores_rostro()
+            if detectores is not None:
+                frontal, perfil, ojos = detectores
+                gris = cv2.equalizeHist(cv2.cvtColor(region, cv2.COLOR_BGR2GRAY))
+                rostros = frontal.detectMultiScale(
+                    gris, scaleFactor=1.1, minNeighbors=6, minSize=(30, 30)
                 )
-            ojos_detectados = ojos.detectMultiScale(
-                gris, scaleFactor=1.1, minNeighbors=7, minSize=(14, 14)
-            )
+                perfiles = perfil.detectMultiScale(
+                    gris, scaleFactor=1.1, minNeighbors=6, minSize=(30, 30)
+                )
+                if len(perfiles) == 0:
+                    perfiles = perfil.detectMultiScale(
+                        cv2.flip(gris, 1), scaleFactor=1.1,
+                        minNeighbors=6, minSize=(30, 30)
+                    )
+                ojos_detectados = ojos.detectMultiScale(
+                    gris, scaleFactor=1.1, minNeighbors=7, minSize=(14, 14)
+                )
 
         if len(rostros) > 0:
-            orientacion, visibilidad = "Frontal o semi frontal", "Rostro visible"
+            orientacion = "Perfil" if pose == "perfil" else "Frontal o semi frontal"
+            visibilidad = "Rostro visible"
             rostro_no_visible_frames = perfil_frames_actuales = espalda_frames_actuales = 0
             rostro_no_visible_activo = False
             evento_perfil_emitido = False
@@ -1980,6 +2193,7 @@ def api_vigilancia_estado():
         "transito_apariciones": TRANSITO_REPETITIVO_APARICIONES,
         "transito_ventana_segundos": TRANSITO_REPETITIVO_VENTANA_SEGUNDOS,
         "deteccion_rostro_activa": DETECCION_ROSTRO_ACTIVA,
+        "detector_rostro": "yunet" if detector_yunet is not None else "haar",
         "deteccion_pose_activa": DETECCION_POSE_ACTIVA,
         "modelo_pose": POSE_MODEL_NAME,
         "rostro_region_superior": ROSTRO_REGION_SUPERIOR,
@@ -2130,6 +2344,23 @@ def api_ruta_recoleccion_datos():
 @trabajador_o_admin_requerido
 def api_ruta_recoleccion_ultima():
     return jsonify({"ruta": obtener_ultima_ruta_recoleccion()})
+
+
+@app.route("/api/estado-urbano/ruta")
+def api_estado_urbano_ruta():
+    """Versión pública de la última ruta de recojo: solo orden, omitidos y
+    distancia (sin niveles de llenado ni datos de dispositivos)."""
+    ruta = obtener_ultima_ruta_recoleccion()
+    if not ruta:
+        return jsonify({"ruta": None})
+    return jsonify({"ruta": {
+        "orden_tachos": ruta["orden_tachos"],
+        "tachos_incluidos": ruta["tachos_incluidos"],
+        "tachos_omitidos": ruta["tachos_omitidos"],
+        "distancia_estimada": ruta["distancia_estimada"],
+        "fecha_generacion": ruta["fecha_generacion"],
+        "desactualizada": ruta["desactualizada"],
+    }})
 
 
 @app.route("/api/ruta-recoleccion-guardar", methods=["POST"])
@@ -2417,11 +2648,25 @@ def actualizar_reporte(reporte_id):
         return redirect(url_for("reportes"))
 
     with get_db() as conn:
+        reporte_previo = conn.execute("""
+            SELECT r.estado, r.titulo, u.telefono
+            FROM reportes_ciudadanos r
+            LEFT JOIN usuarios u ON u.id = r.usuario_id
+            WHERE r.id = ?
+        """, (reporte_id,)).fetchone()
+
         conn.execute("""
             UPDATE reportes_ciudadanos
             SET estado = ?, observacion_admin = ?, actualizado_en = datetime('now','localtime')
             WHERE id = ?
         """, (nuevo_estado, observacion, reporte_id))
+
+    if (reporte_previo and nuevo_estado == "atendido" and reporte_previo["estado"] != "atendido"
+            and reporte_previo["telefono"]):
+        mensaje = f'Tu reporte "{reporte_previo["titulo"]}" ha sido atendido por LSCC.'
+        if observacion:
+            mensaje += f"\nObservación: {observacion}"
+        enviar_whatsapp(reporte_previo["telefono"], mensaje)
 
     return redirect(url_for("reportes"))
 
