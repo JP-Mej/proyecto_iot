@@ -1,17 +1,17 @@
-﻿let chartAmbiental;
+let chartAmbiental;
 let chartResiduos;
 let chartSonido;
-let camStreamUrlActual = "http://10.101.53.9/stream";
+let camStreamUrlActual = "http://192.168.1.20:81/stream";
 
-/* â”€â”€ Estado de nodo por tiempo â”€â”€ */
-// Devuelve true si el dispositivo enviÃ³ un mensaje hace menos de maxSeg segundos
+/* ── Estado de nodo por tiempo ── */
+// Devuelve true si el dispositivo envió un mensaje hace menos de maxSeg segundos
 function nodoOnline(ultima_vez, deviceId, maxSeg) {
     const ts = ultima_vez?.[deviceId];
     if (!ts) return false;
     return (Date.now() / 1000 - ts) < maxSeg;
 }
 
-/* â”€â”€ Utilidades â”€â”€ */
+/* ── Utilidades ── */
 function valor(v, sufijo = "") {
     if (v === null || v === undefined || v === "") return "--";
     return `${v}${sufijo}`;
@@ -43,7 +43,7 @@ function flashUpdate(el) {
     setTimeout(() => el.classList.remove("updating"), 600);
 }
 
-/* â”€â”€ GrÃ¡ficos â”€â”€ */
+/* ── Gráficos ── */
 function commonChartOptions(maxY) {
     const y = {
         ticks: { color: "#64748b" },
@@ -71,9 +71,9 @@ function crearGraficos() {
         data: {
             labels: [],
             datasets: [
-                { label: "Temperatura Â°C", data: [], tension: 0.4, borderWidth: 2, pointRadius: 2 },
+                { label: "Temperatura °C", data: [], tension: 0.4, borderWidth: 2, pointRadius: 2 },
                 { label: "Humedad %",      data: [], tension: 0.4, borderWidth: 2, pointRadius: 2 },
-                { label: "PresiÃ³n hPa",    data: [], tension: 0.4, borderWidth: 2, pointRadius: 2 }
+                { label: "Presión hPa",    data: [], tension: 0.4, borderWidth: 2, pointRadius: 2 }
             ]
         },
         options: commonChartOptions()
@@ -137,14 +137,14 @@ function actualizarGraficos(historial) {
     }
 }
 
-/* â”€â”€ Nodo ambiental â”€â”€ */
+/* ── Nodo ambiental ── */
 function actualizarNodoAmbiental(data) {
     const temp = data.ambiental?.temperatura;
     const hum  = data.ambiental?.humedad;
     const pres = data.ambiental?.presion;
     const gas  = data.ambiental?.gas;
 
-    // Online = mensajes recibidos en los Ãºltimos 60 s
+    // Online = mensajes recibidos en los últimos 60 s
     const online = nodoOnline(data.ultima_vez_modulos, "ESP32_AIRE_01", 60);
 
     const dht22  = online && temp !== null && temp !== undefined && temp !== -1;
@@ -166,7 +166,7 @@ function actualizarNodoAmbiental(data) {
     const dot = document.getElementById("ambientalNodeDot");
     if (dot) dot.className = `node-dot ${online ? "online" : "offline"}`;
 
-    // Hora de la ÃšLTIMA LECTURA del nodo ambiental (no del sistema global)
+    // Hora de la ÚLTIMA LECTURA del nodo ambiental (no del sistema global)
     const lastEl = document.getElementById("ambLastSeen");
     if (lastEl) {
         const ts = data.ultima_vez_modulos?.["ESP32_AIRE_01"];
@@ -177,14 +177,14 @@ function actualizarNodoAmbiental(data) {
     const nivel = (online && gas?.nivel) || "";
     const badge = document.getElementById("airQualityBadge");
     if (badge) {
-        if (!online)                     { badge.textContent = "Sin conexiÃ³n";     badge.className = "quality-badge"; }
-        else if (nivel === "elevado")    { badge.textContent = "Calidad crÃ­tica";  badge.className = "quality-badge bad"; }
+        if (!online)                     { badge.textContent = "Sin conexión";     badge.className = "quality-badge"; }
+        else if (nivel === "elevado")    { badge.textContent = "Calidad crítica";  badge.className = "quality-badge bad"; }
         else if (nivel === "preventivo") { badge.textContent = "Calidad moderada"; badge.className = "quality-badge warn"; }
         else if (mq2)                   { badge.textContent = "Calidad buena";    badge.className = "quality-badge good"; }
         else                            { badge.textContent = "--";               badge.className = "quality-badge"; }
     }
 
-    // Barras de las mÃ©tricas
+    // Barras de las métricas
     const setBar = (id, pct, cls) => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -193,7 +193,7 @@ function actualizarNodoAmbiental(data) {
     };
 
     if (!online) {
-        // Offline â†’ limpiar barras
+        // Offline → limpiar barras
         ["temperaturaBar","humedadBar","presionBar","gasBar"].forEach(id => setBar(id, 0, "bar-ok"));
         return;
     }
@@ -206,7 +206,7 @@ function actualizarNodoAmbiental(data) {
     const humPct = limitarPorcentaje(numero(hum));
     setBar("humedadBar", humPct, humPct > 80 ? "bar-warn" : "bar-ok");
 
-    // PresiÃ³n: normalizar entre 900-1100 hPa â†’ 0-100%
+    // Presión: normalizar entre 900-1100 hPa → 0-100%
     const presVal = numero(pres);
     const presPct = presVal !== null ? limitarPorcentaje(((presVal - 900) / 200) * 100) : 0;
     setBar("presionBar", presPct, "bar-neutral");
@@ -217,7 +217,32 @@ function actualizarNodoAmbiental(data) {
     setBar("gasBar", gasPct, gasCls);
 }
 
-/* â”€â”€ Resumen de residuos â”€â”€ */
+/* ── Riesgo IA ambiental (Random Forest Normal/Incendio) ── */
+function actualizarRiesgoML(data) {
+    const valorEl = document.getElementById("riesgoMlValor");
+    if (!valorEl) return;
+    const detalleEl = document.getElementById("riesgoMlDetalle");
+    const card = document.getElementById("riesgoMlCard");
+    const online = nodoOnline(data.ultima_vez_modulos, "ESP32_AIRE_01", 60);
+    const riesgo = data.ambiental?.riesgo_ml;
+
+    if (!online || !riesgo) {
+        valorEl.textContent = "--";
+        if (detalleEl) detalleEl.textContent = online ? "Modelo no disponible" : "Nodo offline";
+        if (card) card.classList.remove("ml-alerta", "ml-ok");
+        return;
+    }
+
+    const esIncendio = riesgo.prediccion === "Incendio";
+    valorEl.textContent = esIncendio ? "⚠ Incendio" : "Normal";
+    if (detalleEl) detalleEl.textContent = `Confianza: ${riesgo.confianza}% · Random Forest`;
+    if (card) {
+        card.classList.toggle("ml-alerta", esIncendio);
+        card.classList.toggle("ml-ok", !esIncendio);
+    }
+}
+
+/* ── Resumen de residuos ── */
 function actualizarResumenResiduos(data) {
     const tachos = data.residuos?.tachos || {};
     const online = nodoOnline(data.ultima_vez_modulos, "ESP32_RESIDUOS_01", 60);
@@ -255,15 +280,15 @@ function actualizarResumenResiduos(data) {
     }
 }
 
-/* â”€â”€ Nodo sonido â”€â”€ */
+/* ── Nodo sonido ── */
 function actualizarNodoSonido(data) {
-    // KY037 envÃ­a cada 3 s â€” si no hay mensajes en 30 s, estÃ¡ offline
+    // KY037 envía cada 3 s — si no hay mensajes en 30 s, está offline
     const online = nodoOnline(data.ultima_vez_modulos, "ESP32_KY037_01", 30);
     const dot = document.getElementById("sonidoNodeDot");
     if (dot) dot.className = `node-dot ${online ? "online" : "offline"}`;
 }
 
-/* â”€â”€ Tacho â”€â”€ */
+/* ── Tacho ── */
 function actualizarTacho(id, tacho) {
     const porcentaje = tacho?.porcentaje_llenado ?? tacho?.nivel_llenado;
     const p     = numero(porcentaje);
@@ -275,7 +300,7 @@ function actualizarTacho(id, tacho) {
 
     const detEl = document.getElementById(`tacho${id}Detalle`);
     if (detEl) detEl.textContent =
-        `Distancia: ${tacho?.distancia_cm ?? "--"} cm Â· Ãšltima: ${tacho?.ultima_actualizacion ?? "--"}`;
+        `Distancia: ${tacho?.distancia_cm ?? "--"} cm · Última: ${tacho?.ultima_actualizacion ?? "--"}`;
 
     const pill = document.getElementById(`tacho${id}NivelTxt`);
     if (pill) { pill.textContent = nivel; pill.className = `mini-pill ${cls}`; }
@@ -293,7 +318,7 @@ function actualizarTacho(id, tacho) {
     if (card) card.className = `trash-card ${cls}`;
 }
 
-/* â”€â”€ Sonido â”€â”€ */
+/* ── Sonido ── */
 function actualizarSonido(sonido) {
     const raw       = sonido?.value;
     const porcentaje= sonido?.porcentaje;
@@ -323,7 +348,7 @@ function actualizarSonido(sonido) {
     }
 }
 
-/* â”€â”€ Fetch principal â”€â”€ */
+/* ── Fetch principal ── */
 async function cargarDatos() {
     try {
         const r = await fetch("/api/data");
@@ -344,11 +369,11 @@ async function cargarDatos() {
         if (luEl) luEl.textContent = data.ultima_actualizacion
             ? `Actualizado: ${data.ultima_actualizacion}` : "Esperando datos";
 
-        // MÃ©tricas ambientales â€” solo mostrar si el nodo estÃ¡ activo
+        // Métricas ambientales — solo mostrar si el nodo está activo
         const ambOnline = nodoOnline(data.ultima_vez_modulos, "ESP32_AIRE_01", 60);
 
         const tempEl = document.getElementById("temperatura");
-        if (tempEl) { flashUpdate(tempEl); tempEl.textContent = ambOnline ? valor(data.ambiental.temperatura, "Â°") : "--"; }
+        if (tempEl) { flashUpdate(tempEl); tempEl.textContent = ambOnline ? valor(data.ambiental.temperatura, "°") : "--"; }
 
         const humEl = document.getElementById("humedad");
         if (humEl) { flashUpdate(humEl); humEl.textContent = ambOnline ? valor(data.ambiental.humedad, "%") : "--"; }
@@ -361,14 +386,15 @@ async function cargarDatos() {
         const gDetEl   = document.getElementById("gasDetalle");
         if (ambOnline && gas) {
             if (gNivelEl) { flashUpdate(gNivelEl); gNivelEl.textContent = gas.nivel || "--"; }
-            if (gDetEl)   gDetEl.textContent = `ADC: ${gas.value_raw ?? "--"} Â· V: ${gas.voltage ?? "--"}`;
+            if (gDetEl)   gDetEl.textContent = `ADC: ${gas.value_raw ?? "--"} · V: ${gas.voltage ?? "--"}`;
         } else {
             if (gNivelEl) gNivelEl.textContent = "--";
-            if (gDetEl)   gDetEl.textContent   = "ADC: -- Â· V: --";
+            if (gDetEl)   gDetEl.textContent   = "ADC: -- · V: --";
         }
 
         // Nodo ambiental + barras
         actualizarNodoAmbiental(data);
+        actualizarRiesgoML(data);
         // Tachos 1-4; si el nodo está offline se muestra sin datos
         const tachos = data.residuos?.tachos || {};
         const resOnline = nodoOnline(data.ultima_vez_modulos, "ESP32_RESIDUOS_01", 60);
@@ -379,8 +405,8 @@ async function cargarDatos() {
         actualizarSonido(data.vigilancia?.sonido);
         actualizarNodoSonido(data);
 
-        // CÃ¡mara stream
-        // Online = la cÃ¡mara enviÃ³ heartbeat en los Ãºltimos 120 s (heartbeat cada 30 s)
+        // Cámara stream
+        // Online = la cámara envió heartbeat en los últimos 120 s (heartbeat cada 30 s)
         const camOnline = nodoOnline(data.ultima_vez_modulos, "ESP32_CAM_01", 120);
         const livePill  = document.getElementById("camLivePill");
         const camImg    = document.getElementById("cameraImage");
@@ -394,10 +420,10 @@ async function cargarDatos() {
         const metaEl = document.getElementById("imgMeta");
         if (camOnline) {
             if (metaEl) metaEl.textContent = `Stream: ${camStreamUrlActual}`;
-            if (livePill) { livePill.textContent = "â— En vivo"; livePill.className = "pill ok"; }
+            if (livePill) { livePill.textContent = "● En vivo"; livePill.className = "pill ok"; }
         } else {
-            if (metaEl) metaEl.textContent = "CÃ¡mara desconectada";
-            if (livePill) { livePill.textContent = "Sin seÃ±al"; livePill.className = "pill bad"; }
+            if (metaEl) metaEl.textContent = "Cámara desconectada";
+            if (livePill) { livePill.textContent = "Sin señal"; livePill.className = "pill bad"; }
         }
 
         // Log
@@ -421,3 +447,239 @@ async function cargarDatos() {
 crearGraficos();
 cargarDatos();
 setInterval(cargarDatos, 500);
+const usbCameraImage = document.getElementById("usbCameraImage");
+const usbCameraStatus = document.getElementById("usbCameraStatus");
+if (usbCameraImage && usbCameraStatus) {
+    usbCameraImage.addEventListener("load", () => {
+        const placeholder = usbCameraImage.previousElementSibling;
+        if (placeholder) placeholder.hidden = true;
+        usbCameraStatus.textContent = "Conectada";
+        usbCameraStatus.className = "pill ok";
+    });
+    usbCameraImage.addEventListener("error", () => {
+        usbCameraImage.hidden = true;
+        usbCameraStatus.textContent = "No disponible";
+        usbCameraStatus.className = "pill bad";
+    });
+}
+
+function rutaCapturaVigilancia(ruta) {
+    return ruta ? `/static/${ruta.split("/").map(encodeURIComponent).join("/")}` : "";
+}
+
+function abrirCapturaVigilancia(ruta, titulo, fechaHora) {
+    const modal = document.getElementById("surveillanceCaptureModal");
+    const imagen = document.getElementById("captureModalImage");
+    if (!modal || !imagen || !ruta) return;
+    imagen.src = ruta;
+    imagen.alt = `Captura ampliada: ${titulo || "evento de vigilancia"}`;
+    const tituloEl = document.getElementById("captureModalTitle");
+    const metaEl = document.getElementById("captureModalMeta");
+    if (tituloEl) tituloEl.textContent = titulo || "Captura de evento";
+    if (metaEl) metaEl.textContent = fechaHora || "";
+    if (!modal.open) modal.showModal();
+}
+
+let surveillanceLevelFilter = "todos";
+let surveillanceTypeFilter = "todos";
+
+function mostrarResumenVigilancia(resumen) {
+    const contenedor = document.getElementById("surveillanceSummaryCards");
+    if (!contenedor) return;
+    contenedor.innerHTML = "";
+    (resumen.tarjetas || []).forEach(tarjeta => {
+        const articulo = document.createElement("article");
+        articulo.className = `event-summary-card level-${tarjeta.nivel}`;
+        const nombre = document.createElement("span");
+        nombre.textContent = tarjeta.tipo_evento;
+        const cantidad = document.createElement("strong");
+        cantidad.textContent = tarjeta.cantidad;
+        const hora = document.createElement("small");
+        hora.textContent = tarjeta.ultima_hora ? `Último: ${tarjeta.ultima_hora}` : "Sin registros recientes";
+        articulo.append(nombre, cantidad, hora);
+        contenedor.appendChild(articulo);
+    });
+
+    const selector = document.getElementById("eventTypeFilter");
+    if (selector) {
+        const actual = selector.value;
+        selector.innerHTML = '<option value="todos">Todos los tipos</option>';
+        (resumen.tipos_disponibles || []).forEach(tipo => {
+            const opcion = document.createElement("option");
+            opcion.value = tipo;
+            opcion.textContent = tipo;
+            selector.appendChild(opcion);
+        });
+        selector.value = [...selector.options].some(opcion => opcion.value === actual) ? actual : "todos";
+        surveillanceTypeFilter = selector.value;
+    }
+
+    const alerta = resumen.ultima_importante;
+    const tarjetaAlerta = document.getElementById("latestSurveillanceAlert");
+    const tipo = document.getElementById("latestAlertType");
+    const hora = document.getElementById("latestAlertTime");
+    const imagen = document.getElementById("latestAlertImage");
+    if (alerta) {
+        tarjetaAlerta?.classList.remove("empty");
+        if (tipo) tipo.textContent = alerta.tipo_evento;
+        if (hora) hora.textContent = `${alerta.fecha_hora} · ${alerta.descripcion}`;
+        if (imagen && alerta.imagen_path) {
+            imagen.src = rutaCapturaVigilancia(alerta.imagen_path);
+            imagen.dataset.captureTitle = alerta.tipo_evento;
+            imagen.dataset.captureMeta = alerta.fecha_hora;
+            imagen.hidden = false;
+        }
+    } else {
+        tarjetaAlerta?.classList.add("empty");
+        if (tipo) tipo.textContent = "Sin alertas importantes recientes";
+        if (hora) hora.textContent = "Se priorizan eventos de revisión y nivel alto.";
+        if (imagen) imagen.hidden = true;
+    }
+}
+
+async function marcarEventoVigilanciaRevisado(eventoId) {
+    const token = document.getElementById("surveillanceCsrfToken")?.value;
+    const respuesta = await fetch(`/api/vigilancia/eventos/${eventoId}/revisar`, {
+        method: "POST",
+        headers: { "X-CSRF-Token": token || "" }
+    });
+    if (!respuesta.ok) throw new Error("No se pudo actualizar el evento");
+    await cargarVigilanciaInteligente();
+}
+
+function mostrarEventosVigilancia(eventos) {
+    const cuerpo = document.getElementById("surveillanceEventsBody");
+    if (!cuerpo) return;
+    cuerpo.innerHTML = "";
+    if (!eventos.length) {
+        const fila = cuerpo.insertRow();
+        const celda = fila.insertCell();
+        celda.colSpan = 7;
+        celda.className = "muted";
+        celda.textContent = "Sin eventos recientes";
+        return;
+    }
+    eventos.forEach(evento => {
+        const fila = cuerpo.insertRow();
+        [evento.fecha_hora, evento.tipo_evento, evento.camara].forEach(valor => {
+            fila.insertCell().textContent = valor || "--";
+        });
+        const nivel = fila.insertCell();
+        const nivelBadge = document.createElement("span");
+        nivelBadge.className = `event-level ${evento.nivel}`;
+        nivelBadge.textContent = evento.nivel;
+        nivel.appendChild(nivelBadge);
+        fila.insertCell().textContent = evento.estado || "--";
+        const captura = fila.insertCell();
+        if (evento.imagen_path) {
+            const botonCaptura = document.createElement("button");
+            botonCaptura.type = "button";
+            botonCaptura.className = "capture-view-btn";
+            botonCaptura.textContent = "Ver captura";
+            botonCaptura.addEventListener("click", () => {
+                abrirCapturaVigilancia(
+                    rutaCapturaVigilancia(evento.imagen_path),
+                    evento.tipo_evento,
+                    evento.fecha_hora
+                );
+            });
+            captura.appendChild(botonCaptura);
+        } else {
+            captura.textContent = "--";
+        }
+        const accion = fila.insertCell();
+        if (evento.estado === "pendiente") {
+            const boton = document.createElement("button");
+            boton.type = "button";
+            boton.className = "review-event-btn";
+            boton.textContent = "Marcar revisado";
+            boton.addEventListener("click", async () => {
+                boton.disabled = true;
+                try { await marcarEventoVigilanciaRevisado(evento.id); }
+                catch (error) { console.error(error); boton.disabled = false; }
+            });
+            accion.appendChild(boton);
+        } else {
+            const revisado = document.createElement("span");
+            revisado.className = "event-reviewed";
+            revisado.textContent = "Revisado";
+            accion.appendChild(revisado);
+        }
+    });
+}
+
+async function cargarVigilanciaInteligente() {
+    const indicador = document.getElementById("smartAnalysisStatus");
+    if (!indicador) return;
+    try {
+        const parametros = new URLSearchParams({
+            limite: "10", nivel: surveillanceLevelFilter, tipo: surveillanceTypeFilter
+        });
+        const [estadoRespuesta, eventosRespuesta, resumenRespuesta] = await Promise.all([
+            fetch("/api/vigilancia/estado", { cache: "no-store" }),
+            fetch(`/api/vigilancia/eventos?${parametros}`, { cache: "no-store" }),
+            fetch("/api/vigilancia/resumen", { cache: "no-store" })
+        ]);
+        if (!estadoRespuesta.ok || !eventosRespuesta.ok || !resumenRespuesta.ok) throw new Error("API no disponible");
+        const estado = await estadoRespuesta.json();
+        const eventos = await eventosRespuesta.json();
+        const resumen = await resumenRespuesta.json();
+        indicador.textContent = estado.estado || "Sin eventos recientes";
+        indicador.className = estado.disponible === false ? "pill bad" : "pill ok";
+        const orientacion = document.getElementById("faceOrientationStatus");
+        if (orientacion) {
+            const valor = estado.orientacion_estimada || "No determinada";
+            orientacion.textContent = `Orientación: ${valor}`;
+        }
+        const persona = document.getElementById("personDetectionStatus");
+        if (persona) persona.textContent = `Persona: ${estado.estado_persona || "Sin persona"}`;
+        const visibilidad = document.getElementById("faceVisibilityStatus");
+        if (visibilidad) {
+            const valor = estado.visibilidad_facial || "No concluyente";
+            visibilidad.textContent = `Visibilidad: ${valor}`;
+            visibilidad.className = valor === "Rostro visible" ? "pill ok" : "pill";
+        }
+        const nivel = document.getElementById("surveillanceAlertLevel");
+        if (nivel) {
+            const valor = estado.nivel_alerta || "normal";
+            nivel.textContent = `Nivel: ${valor}`;
+            nivel.className = ["alto", "revisión"].includes(valor) ? "pill bad" : (valor === "normal" ? "pill ok" : "pill");
+        }
+
+        mostrarResumenVigilancia(resumen);
+        mostrarEventosVigilancia(eventos);
+    } catch (error) {
+        indicador.textContent = "Análisis inteligente no disponible";
+        indicador.className = "pill bad";
+        console.error("Error cargando vigilancia inteligente:", error);
+    }
+}
+
+if (document.getElementById("smartAnalysisStatus")) {
+    const captureModal = document.getElementById("surveillanceCaptureModal");
+    document.getElementById("closeCaptureModal")?.addEventListener("click", () => captureModal?.close());
+    captureModal?.addEventListener("click", evento => {
+        if (evento.target === captureModal) captureModal.close();
+    });
+    document.getElementById("latestAlertImage")?.addEventListener("click", evento => {
+        abrirCapturaVigilancia(
+            evento.currentTarget.src,
+            evento.currentTarget.dataset.captureTitle,
+            evento.currentTarget.dataset.captureMeta
+        );
+    });
+    document.querySelectorAll(".event-filter").forEach(boton => {
+        boton.addEventListener("click", () => {
+            document.querySelectorAll(".event-filter").forEach(item => item.classList.remove("active"));
+            boton.classList.add("active");
+            surveillanceLevelFilter = boton.dataset.level;
+            cargarVigilanciaInteligente();
+        });
+    });
+    document.getElementById("eventTypeFilter")?.addEventListener("change", evento => {
+        surveillanceTypeFilter = evento.target.value;
+        cargarVigilanciaInteligente();
+    });
+    cargarVigilanciaInteligente();
+    setInterval(cargarVigilanciaInteligente, 3000);
+}

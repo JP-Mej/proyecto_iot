@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="es">
 <head>
   <meta charset="UTF-8"/>
@@ -8,37 +8,37 @@
   {% if rol in ['admin', 'trabajador'] %}<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>{% endif %}
 </head>
 <body class="dashboard-body">
-<input class="nav-toggle" type="checkbox" id="navToggle" aria-label="Abrir menÃº de navegaciÃ³n">
+<input class="nav-toggle" type="checkbox" id="navToggle" aria-label="Abrir menú de navegación">
 <label class="nav-backdrop" for="navToggle" aria-hidden="true"></label>
 <aside class="sidebar">
   <div class="sidebar-brand"><span class="brand-badge">LSCC</span><div><strong>Lima Smart</strong><small>Core City</small></div></div>
-  <nav class="sidebar-nav" aria-label="NavegaciÃ³n principal">
+  <nav class="sidebar-nav" aria-label="Navegación principal">
     <span class="nav-group">General</span>
-    <a class="side-link active" href="/"><span>âŒ‚</span> {% if rol == 'usuario' %}Inicio{% else %}Dashboard{% endif %}</a>
+    <a class="side-link active" href="/"><span>⌂</span> {% if rol == 'usuario' %}Inicio{% else %}Dashboard{% endif %}</a>
     {% if rol in ['admin', 'trabajador'] %}
     <span class="nav-group">Monitoreo</span>
-    <a class="side-link" href="#sec-camara"><span>â—‰</span> Ãrea de Vigilancia</a>
-    <a class="side-link" href="#sec-ambiental"><span>â—Œ</span> Ãrea de Ambiente</a>
-    <a class="side-link" href="#sec-residuos"><span>â–¦</span> Ãrea de Residuos</a>
-    <a class="side-link" href="#sec-sonido"><span>â‰‹</span> Sonido ambiental</a>
-    <a class="side-link" href="#sec-log"><span>âŒ</span> Registro tÃ©cnico</a>
-    <span class="nav-group">GestiÃ³n</span>
-    <a class="side-link" href="/reportes"><span>â–¡</span> {% if rol == 'trabajador' %}Atender reportes{% else %}Reportes{% endif %}</a>
-    {% if rol == 'admin' %}<a class="side-link" href="/usuarios"><span>â™™</span> Trabajadores</a>{% endif %}
+    <a class="side-link" href="#sec-camara"><span>◉</span> Área de Vigilancia</a>
+    <a class="side-link" href="#sec-ambiental"><span>◌</span> Área de Ambiente</a>
+    <a class="side-link" href="#sec-residuos"><span>▦</span> Área de Residuos</a>
+    <a class="side-link" href="#sec-sonido"><span>≋</span> Sonido ambiental</a>
+    <a class="side-link" href="#sec-log"><span>⌁</span> Registro técnico</a>
+    <span class="nav-group">Gestión</span>
+    <a class="side-link" href="/reportes"><span>□</span> {% if rol == 'trabajador' %}Atender reportes{% else %}Reportes{% endif %}</a>
+    {% if rol == 'admin' %}<a class="side-link" href="/usuarios"><span>♙</span> Trabajadores</a>{% endif %}
     {% else %}
-    <span class="nav-group">ParticipaciÃ³n</span>
-    <a class="side-link" href="/nuevo-reporte"><span>ï¼‹</span> Nuevo reporte</a>
-    <a class="side-link" href="/reportes"><span>â–¡</span> Mis reportes</a>
+    <span class="nav-group">Participación</span>
+    <a class="side-link" href="/nuevo-reporte"><span>+</span> Nuevo reporte</a>
+    <a class="side-link" href="/reportes"><span>□</span> Mis reportes</a>
     {% endif %}
   </nav>
   <div class="sidebar-account"><span class="nav-group">Cuenta</span><div class="account-chip"><span class="avatar">{{ username[0]|upper }}</span><div><strong>{{ username }}</strong><small>{{ rol }}</small></div></div>
-    <form class="logout-form" method="POST" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="side-logout" type="submit">Cerrar sesiÃ³n</button></form>
+    <form class="logout-form" method="POST" action="/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="side-logout" type="submit">Cerrar sesión</button></form>
   </div>
 </aside>
 
-<!-- â”€â”€ TOPBAR â”€â”€ -->
+<!-- ── TOPBAR ── -->
 <header class="topbar">
-  <label class="menu-button" for="navToggle" aria-label="Abrir menÃº">â˜°</label>
+  <label class="menu-button" for="navToggle" aria-label="Abrir menú">☰</label>
   <div class="brand">
     <span class="brand-badge">LSCC</span>
     <div>
@@ -47,7 +47,7 @@
     </div>
   </div>
   <div class="status-box">
-    <span class="user-pill">{{ username }} Â· {{ rol }}</span>
+    <span class="user-pill">{{ username }} · {{ rol }}</span>
     <a class="nav-link" href="/">Dashboard</a>
     {% if rol == 'usuario' %}
       <a class="nav-link" href="/nuevo-reporte">Nuevo reporte</a>
@@ -64,15 +64,15 @@
     {% endif %}
     <form class="logout-form" method="POST" action="/logout">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="logout-link" type="submit">Cerrar sesiÃ³n</button>
+      <button class="logout-link" type="submit">Cerrar sesión</button>
     </form>
   </div>
 </header>
 
-<!-- â”€â”€ SECTION NAV â”€â”€ -->
+<!-- ── SECTION NAV ── -->
 {% if rol in ['admin', 'trabajador'] %}
 <nav class="section-nav">
-  <a href="#sec-camara"    class="snav-link">CÃ¡mara</a>
+  <a href="#sec-camara"    class="snav-link">Cámara</a>
   <a href="#sec-ambiental" class="snav-link">Ambiental</a>
   <a href="#sec-residuos"  class="snav-link">Residuos</a>
   <a href="#sec-sonido"    class="snav-link">Sonido</a>
@@ -85,9 +85,9 @@
   {% if rol == 'usuario' %}
   <section class="citizen-hero" aria-labelledby="citizenWelcome">
     <div class="citizen-hero-copy">
-      <span class="section-label">ParticipaciÃ³n ciudadana</span>
-      <h2 id="citizenWelcome">Hola, {{ username }}. AyÃºdanos a cuidar tu ciudad.</h2>
-      <p>Comunica una incidencia de ambiente, residuos o vigilancia. El equipo responsable podrÃ¡ revisarla y mantenerte al tanto de su atenciÃ³n.</p>
+      <span class="section-label">Participación ciudadana</span>
+      <h2 id="citizenWelcome">Hola, {{ username }}. Ayúdanos a cuidar tu ciudad.</h2>
+      <p>Comunica una incidencia de ambiente, residuos o vigilancia. El equipo responsable podrá revisarla y mantenerte al tanto de su atención.</p>
       <div class="citizen-actions">
         <a class="primary-action" href="/nuevo-reporte">Crear nuevo reporte</a>
         <a class="secondary-action" href="/reportes">Consultar mis reportes</a>
@@ -96,16 +96,16 @@
     <div class="citizen-symbol" aria-hidden="true"><span>LSCC</span><small>Tu ciudad, conectada contigo</small></div>
   </section>
 
-  <section class="citizen-summary" aria-label="CÃ³mo usar la plataforma">
-    <article><span class="step-number">1</span><div><h3>Identifica</h3><p>Selecciona la categorÃ­a que mejor describe la incidencia.</p></div></article>
-    <article><span class="step-number">2</span><div><h3>Describe</h3><p>Indica la ubicaciÃ³n y aÃ±ade informaciÃ³n clara para facilitar la atenciÃ³n.</p></div></article>
-    <article><span class="step-number">3</span><div><h3>Consulta</h3><p>Revisa el estado y las observaciones desde â€œMis reportesâ€.</p></div></article>
+  <section class="citizen-summary" aria-label="Cómo usar la plataforma">
+    <article><span class="step-number">1</span><div><h3>Identifica</h3><p>Selecciona la categoría que mejor describe la incidencia.</p></div></article>
+    <article><span class="step-number">2</span><div><h3>Describe</h3><p>Indica la ubicación y añade información clara para facilitar la atención.</p></div></article>
+    <article><span class="step-number">3</span><div><h3>Consulta</h3><p>Revisa el estado y las observaciones desde "Mis reportes".</p></div></article>
   </section>
 
   <section class="citizen-report-summary" aria-label="Resumen de mis reportes">
     <div><span>Mis reportes</span><strong>{{ contadores.total }}</strong></div>
     <div><span>Pendientes</span><strong>{{ contadores.pendiente }}</strong></div>
-    <div><span>En revisiÃ³n</span><strong>{{ contadores.en_revision }}</strong></div>
+    <div><span>En revisión</span><strong>{{ contadores.en_revision }}</strong></div>
     <div><span>Atendidos</span><strong>{{ contadores.atendido }}</strong></div>
   </section>
   {% else %}
@@ -120,12 +120,12 @@
     <article class="qs-card qs-warn">
       <span>Pendientes</span>
       <strong>{{ contadores.pendiente }}</strong>
-      <small>Necesitan revisiÃ³n</small>
+      <small>Necesitan revisión</small>
     </article>
     <article class="qs-card qs-info">
-      <span>En revisiÃ³n</span>
+      <span>En revisión</span>
       <strong>{{ contadores.en_revision }}</strong>
-      <small>En proceso de atenciÃ³n</small>
+      <small>En proceso de atención</small>
     </article>
     <article class="qs-card qs-ok">
       <span>Atendidos</span>
@@ -138,7 +138,7 @@
   {% if rol in ['admin', 'trabajador'] %}
   <section class="panel action-panel">
     <span class="section-label">{% if rol == 'admin' %}Panel administrativo{% else %}Panel de trabajador{% endif %}</span>
-    <p>{% if rol == 'admin' %}Supervisa sensores, usuarios internos y reportes para decidir prioridades operativas.{% else %}Revisa reportes ciudadanos, cambia estados y registra observaciones de atenciÃ³n.{% endif %}</p>
+    <p>{% if rol == 'admin' %}Supervisa sensores, usuarios internos y reportes para decidir prioridades operativas.{% else %}Revisa reportes ciudadanos, cambia estados y registra observaciones de atención.{% endif %}</p>
     <div class="quick-actions">
       <a href="/reportes?estado=pendiente">Revisar pendientes</a>
       <a href="/reportes?categoria=residuos">Reportes de residuos</a>
@@ -148,7 +148,7 @@
   </section>
   {% else %}
   <section class="panel action-panel">
-    <span class="section-label">ParticipaciÃ³n ciudadana</span>
+    <span class="section-label">Participación ciudadana</span>
     <p>Registra incidencias de tu zona para que el equipo de trabajo las revise y atienda.</p>
     <div class="quick-actions">
       <a href="/nuevo-reporte">Enviar nuevo reporte</a>
@@ -157,31 +157,31 @@
   </section>
   {% endif %}
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       MÃ“DULO: CÃMARA
-  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ══════════════════════════════════════
+       MÓDULO: CÁMARA
+  ══════════════════════════════════════ -->
   <section id="sec-camara" class="module mod-vigilancia">
     <div class="mod-header">
       <div class="mod-title">
         <span class="mod-tag tag-vigilancia">Vigilancia</span>
-        <h2>CÃ¡mara ESP32-CAM</h2>
+        <h2>Cámara ESP32-CAM</h2>
       </div>
-      <span id="camLivePill" class="pill">Sin seÃ±al</span>
+      <span id="camLivePill" class="pill">Sin señal</span>
     </div>
     <div class="camera-box">
-      <img id="cameraImage" src="http://192.168.100.125/stream" alt="Stream ESP32-CAM"/>
+      <img id="cameraImage" src="http://192.168.1.20:81/stream" alt="Stream ESP32-CAM"/>
     </div>
     <p class="camera-meta"><span id="imgMeta">Conectando al stream...</span></p>
   </section>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       MÃ“DULO: AMBIENTAL
-  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ══════════════════════════════════════
+       MÓDULO: AMBIENTAL
+  ══════════════════════════════════════ -->
   <section id="sec-ambiental" class="module mod-ambiental">
     <div class="mod-header">
       <div class="mod-title">
         <span class="mod-tag tag-ambiental">Ambiental</span>
-        <h2>Calidad de aire y variables fÃ­sicas</h2>
+        <h2>Calidad de aire y variables físicas</h2>
       </div>
       <div class="mod-right">
         <span id="airQualityBadge" class="quality-badge">--</span>
@@ -205,36 +205,41 @@
         <span id="chipMQ2"    class="sensor-chip offline">MQ-2</span>
       </div>
       <div class="nb-item">
-        <span class="nb-label">Ãšltima lectura</span>
+        <span class="nb-label">Última lectura</span>
         <span id="ambLastSeen" class="nb-value">--</span>
       </div>
     </div>
 
-    <!-- MÃ©tricas ambientales -->
+    <!-- Métricas ambientales -->
     <div class="ambient-grid">
       <article class="metric-card">
         <span class="mc-label">Temperatura</span>
         <strong id="temperatura" class="mc-value">--</strong>
-        <small>Â°C Â· DHT22</small>
+        <small>°C · DHT22</small>
         <div class="mc-bar"><span id="temperaturaBar" class="bar-fill"></span></div>
       </article>
       <article class="metric-card">
         <span class="mc-label">Humedad</span>
         <strong id="humedad" class="mc-value">--</strong>
-        <small>%HR Â· DHT22</small>
+        <small>%HR · DHT22</small>
         <div class="mc-bar"><span id="humedadBar" class="bar-fill"></span></div>
       </article>
       <article class="metric-card">
-        <span class="mc-label">PresiÃ³n</span>
+        <span class="mc-label">Presión</span>
         <strong id="presion" class="mc-value">--</strong>
-        <small>hPa Â· BMP280</small>
+        <small>hPa · BMP280</small>
         <div class="mc-bar"><span id="presionBar" class="bar-fill bar-neutral"></span></div>
       </article>
       <article class="metric-card">
         <span class="mc-label">Gas MQ-2</span>
         <strong id="gasNivel" class="mc-value">--</strong>
-        <small id="gasDetalle">ADC: -- Â· V: --</small>
+        <small id="gasDetalle">ADC: -- · V: --</small>
         <div class="mc-bar"><span id="gasBar" class="bar-fill"></span></div>
+      </article>
+      <article class="metric-card" id="riesgoMlCard">
+        <span class="mc-label">Riesgo IA</span>
+        <strong id="riesgoMlValor" class="mc-value">--</strong>
+        <small id="riesgoMlDetalle">Random Forest · 4 variables</small>
       </article>
     </div>
 
@@ -245,9 +250,9 @@
     </article>
   </section>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       MÃ“DULO: RESIDUOS
-  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ══════════════════════════════════════
+       MÓDULO: RESIDUOS
+  ══════════════════════════════════════ -->
   <section id="sec-residuos" class="module mod-residuos">
     <div class="mod-header">
       <div class="mod-title">
@@ -291,7 +296,7 @@
           <strong id="tacho1Porcentaje" class="tc-pct">--</strong>
         </div>
         <div class="progress tc-progress"><span id="tacho1Bar"></span></div>
-        <small id="tacho1Detalle" class="tc-detail">Distancia: -- cm Â· Ãšltima: --</small>
+        <small id="tacho1Detalle" class="tc-detail">Distancia: -- cm · Última: --</small>
       </article>
 
       <article class="trash-card" id="tachoCard2">
@@ -306,7 +311,7 @@
           <strong id="tacho2Porcentaje" class="tc-pct">--</strong>
         </div>
         <div class="progress tc-progress"><span id="tacho2Bar"></span></div>
-        <small id="tacho2Detalle" class="tc-detail">Distancia: -- cm Â· Ãšltima: --</small>
+        <small id="tacho2Detalle" class="tc-detail">Distancia: -- cm · Última: --</small>
       </article>
 
       <article class="trash-card" id="tachoCard3">
@@ -321,7 +326,7 @@
           <strong id="tacho3Porcentaje" class="tc-pct">--</strong>
         </div>
         <div class="progress tc-progress"><span id="tacho3Bar"></span></div>
-        <small id="tacho3Detalle" class="tc-detail">Distancia: -- cm Â· Ãšltima: --</small>
+        <small id="tacho3Detalle" class="tc-detail">Distancia: -- cm · Última: --</small>
       </article>
 
       <article class="trash-card" id="tachoCard4">
@@ -348,9 +353,9 @@
     </article>
   </section>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       MÃ“DULO: SONIDO
-  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ══════════════════════════════════════
+       MÓDULO: SONIDO
+  ══════════════════════════════════════ -->
   <section id="sec-sonido" class="module mod-sonido">
     <div class="mod-header">
       <div class="mod-title">
@@ -370,7 +375,7 @@
       <article class="metric-card">
         <span class="mc-label">Valor RAW ADC</span>
         <strong id="sonidoRaw" class="mc-value">--</strong>
-        <small>Rango ESP32: 0 â€“ 4095</small>
+        <small>Rango ESP32: 0 – 4095</small>
       </article>
       <article class="metric-card">
         <span class="mc-label">Voltaje</span>
@@ -378,9 +383,9 @@
         <small>Salida AO del KY-037</small>
       </article>
       <article class="metric-card">
-        <span class="mc-label">ClasificaciÃ³n</span>
+        <span class="mc-label">Clasificación</span>
         <strong id="sonidoNivel" class="mc-value">--</strong>
-        <small>SegÃºn umbrales del sensor</small>
+        <small>Según umbrales del sensor</small>
       </article>
     </div>
 
@@ -390,14 +395,14 @@
     </article>
   </section>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       MÃ“DULO: LOG
-  â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ══════════════════════════════════════
+       MÓDULO: LOG
+  ══════════════════════════════════════ -->
   <section id="sec-log" class="module mod-log">
     <div class="mod-header">
       <div class="mod-title">
         <span class="mod-tag tag-log">Sistema</span>
-        <h2>Log de recepciÃ³n MQTT</h2>
+        <h2>Log de recepción MQTT</h2>
       </div>
     </div>
     <div class="log-container">

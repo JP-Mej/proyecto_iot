@@ -6,7 +6,7 @@
   FUNCIONES:
     - Conecta WiFi y MQTT mediante portal WiFiManager.
     - Publica estado (online / IP / stream_url) por MQTT cada 30 s.
-    - Sirve stream MJPEG en tiempo real en http://<ip>/stream
+    - Sirve stream MJPEG en tiempo real en http://<ip>:81/stream
       (accesible desde el navegador del dashboard directamente).
 
   RESOLUCIÓN:
@@ -135,8 +135,8 @@ esp_err_t stream_handler(httpd_req_t* req) {
 
 void iniciarStreamServer() {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port    = 80;
-    config.max_uri_handlers = 4;
+    config.server_port    = 81;
+    config.max_uri_handlers = 1;
 
     httpd_uri_t stream_uri = {
         .uri      = "/stream",
@@ -147,7 +147,7 @@ void iniciarStreamServer() {
 
     if (httpd_start(&stream_httpd, &config) == ESP_OK) {
         httpd_register_uri_handler(stream_httpd, &stream_uri);
-        Serial.printf("[HTTP] Stream en http://%s/stream\n",
+        Serial.printf("Stream para plataforma: http://%s:81/stream\n",
                       WiFi.localIP().toString().c_str());
     } else {
         Serial.println("[HTTP] Error al iniciar servidor");
@@ -262,7 +262,7 @@ void abrirPortalConfigMQTT(const char* motivo) {
 
 void publicarStatus() {
     String ip  = WiFi.localIP().toString();
-    String url = "http://" + ip + "/stream";
+    String url = "http://" + ip + ":81/stream";
 
     StaticJsonDocument<384> doc;
     doc["device_id"]        = DEVICE_ID;
